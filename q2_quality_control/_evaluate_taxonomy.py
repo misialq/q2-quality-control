@@ -7,6 +7,7 @@
 # ----------------------------------------------------------------------------
 
 import pandas as pd
+from sklearn.metrics import matthews_corrcoef
 
 
 def _evaluate_taxonomy(exp_taxa, obs_taxa, require_exp_ids=True,
@@ -47,6 +48,17 @@ def _compute_prf(exp, obs, l_range=range(0, 7), sample_weight=None):
 
     return p, r, f
 
+
+def _compute_mcc(exp, obs, l_range=range(0, 7), sample_weight=None):
+    m = {}
+    # iterate over multiple taxonomic levels
+    for lvl in l_range:
+        lvl = lvl + 1
+        _obs = _extract_taxa_names(obs, level=slice(0, lvl))
+        _exp = _extract_taxa_names(exp, level=slice(0, lvl))
+        m[lvl] = matthews_corrcoef(
+            y_true=_exp, y_pred=_obs, sample_weight=sample_weight)
+    return m
 
 # modified from tax-credit with permission of nbokulich
 def _extract_taxa_names(inlist, level=slice(6, 7), delim=';', stripchars=None):
@@ -106,11 +118,13 @@ def _index_is_subset(series1, series2, name):
 
 
 def _prf_to_dataframe(exp, obs, sample_weight=None, level_range=range(0, 7)):
-    p, r, f = _compute_prf(
+    # p, r, f = _compute_prf(
+    #     exp, obs, l_range=level_range, sample_weight=sample_weight)
+    m = _compute_mcc(
         exp, obs, l_range=level_range, sample_weight=sample_weight)
-    prf = pd.DataFrame([p, r, f]).T
+    prf = pd.DataFrame([m]).T
     prf = prf.reset_index()
-    prf.columns = ['level', 'Precision', 'Recall', 'F-measure']
+    prf.columns = ['level', 'MCC']
     return prf
 
 
