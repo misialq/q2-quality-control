@@ -70,6 +70,7 @@ filter_parameters = {
     'ref_gap_open_penalty': Int % Range(1, None),
     'ref_gap_ext_penalty': Int % Range(1, None),
     'exclude_seqs': Bool,
+    'score_min': Str
 }
 
 filter_parameter_descriptions = {
@@ -81,7 +82,10 @@ filter_parameter_descriptions = {
     'ref_gap_ext_penalty': 'Reference gap extend penalty.',
     'exclude_seqs': 'Exclude sequences that align to reference. Set this '
                     'option to False to exclude sequences that do not align '
-                    'to the reference database.'
+                    'to the reference database.',
+    'score_min': 'A function to determine min. acceptable alignment score w/r/t '
+                 'read length. For details on how to set functions consult '
+                 'Bowtie 2 manual.'
 }
 
 P_method, P_left_justify, _ = TypeMap({

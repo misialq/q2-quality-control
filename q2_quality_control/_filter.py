@@ -39,6 +39,7 @@ _filter_defaults = {
     'exclude_seqs': True,
     'ref_gap_open_penalty': 5,
     'ref_gap_ext_penalty': 3,
+    'score_min': None
 }
 
 
@@ -59,7 +60,8 @@ def filter_reads(
         sensitivity: str = _filter_defaults['sensitivity'],
         ref_gap_open_penalty: str = _filter_defaults['ref_gap_open_penalty'],
         ref_gap_ext_penalty: str = _filter_defaults['ref_gap_ext_penalty'],
-        exclude_seqs: str = _filter_defaults['exclude_seqs']) \
+        exclude_seqs: str = _filter_defaults['exclude_seqs'],
+        score_min: str = _filter_defaults['score_min']) \
             -> CasavaOneEightSingleLanePerSampleDirFmt:
     filtered_seqs = CasavaOneEightSingleLanePerSampleDirFmt()
     df = demultiplexed_sequences.manifest
@@ -68,13 +70,13 @@ def filter_reads(
     for fwd, rev in fastq_paths:
         _bowtie2_filter(fwd, rev, filtered_seqs, database, n_threads, mode,
                         sensitivity, ref_gap_open_penalty, ref_gap_ext_penalty,
-                        exclude_seqs)
+                        exclude_seqs, score_min)
     return filtered_seqs
 
 
 def _bowtie2_filter(f_read, r_read, outdir, database, n_threads, mode,
                     sensitivity, ref_gap_open_penalty, ref_gap_ext_penalty,
-                    exclude_seqs):
+                    exclude_seqs, score_min):
     if mode == 'local':
         mode = '--{0}-{1}'.format(sensitivity, mode)
     else:
@@ -90,6 +92,8 @@ def _bowtie2_filter(f_read, r_read, outdir, database, n_threads, mode,
             bowtie_cmd = ['bowtie2', '-p', str(n_threads), mode,
                           '--rfg', rfg_setting,
                           '-x', str(database.path / database.get_basename())]
+            if score_min is not None:
+                bowtie_cmd += ['--score-min', score_min]
             if r_read is not None:
                 bowtie_cmd += ['-1', f_read, '-2', r_read]
             else:
