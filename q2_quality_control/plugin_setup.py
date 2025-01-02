@@ -336,13 +336,16 @@ plugin.methods.register_function(
                    'contaminants'),
         'freq_concentration_column': ('Input column name that has '
                                       'concentration information for '
-                                      'the samples'),
+                                      'the samples, used in '
+                                      'Frequency or Combined methods'),
         'prev_control_column': ('Input column name containing '
                                 'experimental or control '
-                                'sample metadata'),
+                                'sample metadata, used in '
+                                'Prevalence or Combined methods'),
         'prev_control_indicator': ('indicate the '
                                    'control sample identifier '
-                                   '(e.g. "control" or "blank")')
+                                   '(e.g. "control" or "blank"), used in '
+                                   'Prevalence or Combined methods')
     },
     output_descriptions={
         'decontam_scores': ('The resulting table of scores '
@@ -463,13 +466,16 @@ plugin.pipelines.register_function(
                                  'a split feature table are dropped.',
         'freq_concentration_column': ('Input column name that has '
                                       'concentration information for '
-                                      'the samples'),
+                                      'the samples, used in '
+                                      'Frequency or Combined methods'),
         'prev_control_column': ('Input column name containing '
                                 'experimental or control '
-                                'sample metadata'),
+                                'sample metadata, used in '
+                                'Prevalence or Combined methods'),
         'prev_control_indicator': ('indicate the '
                                    'control sample identifier '
-                                   '(e.g. "control" or "blank")'),
+                                   '(e.g. "control" or "blank"), used in '
+                                   'Prevalence or Combined methods'),
         'threshold': ('Select threshold cutoff for decontam algorithm scores'),
         'weighted': ('weight the decontam scores by their '
                      'associated read number'),
