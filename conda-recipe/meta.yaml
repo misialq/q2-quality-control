@@ -29,6 +29,7 @@ requirements:
   - q2-feature-table {{ qiime2_epoch }}.*
   - biom-format {{ biom_format }}
   build:
+  - python {{ python }}
   - setuptools
   - versioningit
 test:
