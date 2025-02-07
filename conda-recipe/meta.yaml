@@ -19,7 +19,7 @@ requirements:
   - bioconductor-decontam
   - r-base {{ r_base }}
   - r-optparse >=1.7.1
-  - vsearch
+  - vsearch {{ vsearch }}
   - samtools >=1.15
   - bowtie2
   - qiime2 {{ qiime2_epoch }}.*
