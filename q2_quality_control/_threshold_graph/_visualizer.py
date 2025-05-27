@@ -7,14 +7,13 @@
 # ----------------------------------------------------------------------------
 import os.path
 import importlib.resources
-import shutil
-
 import decimal
 import q2templates
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from q2_types.feature_data import DNAIterator
+import shutil
 
 
 TEMPLATES = importlib.resources.files(
@@ -24,6 +23,20 @@ TEMPLATES = importlib.resources.files(
 # generates sequence table and fasta files for each assignment
 def _write_table_fastas(output_dir, dest, sequences, seq_list,
                         desig, decontam_scores, read_nums, table):
+    '''Writes df for feature table in html with fasta files
+    Args:
+        output_dir (string): output location of fasta files
+        dest (string): specific file name
+        sequences (dict): dictionary containing pertinant information
+        seq_list (list): list of sequences
+        decontam_scores (df): Dataframe of Decontam Scores
+        read_nums (pandas series): Array of read numbers by asv
+        table (df): Feature Table
+    Returns:
+        sequences (dict): dictionary containing pertinant information,
+                          (seq, designation, p value, read numbers,
+                          and prevalence)
+    '''
     _blast_url_template = ("http://www.ncbi.nlm.nih.gov/BLAST/Blast.cgi?"
                            "ALIGNMENT_VIEW=Pairwise&PROGRAM=blastn&DATABASE"
                            "=nt&CMD=Put&QUERY=%s")
@@ -42,6 +55,79 @@ def _write_table_fastas(output_dir, dest, sequences, seq_list,
     return sequences
 
 
+def _write_table(sequences, indices, desig,
+                 decontam_scores, read_nums, table):
+    '''Writes df for feature table in html without fasta files
+    Args:
+        sequences (dict): dictionary containing pertinant information
+        indices (series): Array of indicies to be saved with info
+        desig (string): indicates contaminant or not
+        decontam_scores (df): Dataframe of Decontam Scores
+        read_nums (pandas series): Array of read numbers by asv
+        table (df): Feature of table
+    Returns:
+        sequences (dict): dictionary containing pertinant information,
+                          (designation, p value, read numbers,
+                           and prevalence)
+    '''
+
+    for index in indices:
+        sequences[index] = {
+            'contam_or_naw': desig,
+            'p_val': decontam_scores.loc[index, 'p'],
+            'read_nums': read_nums.loc[index],
+            'prevalence': (table[index] != 0).sum()
+        }
+    return sequences
+
+
+def _asv_calcs(contams, decontam_scores):
+    '''Calculates statistics rendered below graph in html feature specific
+    Args:
+        decontam_scores (df): Dataframe of Decontam Scores
+        contams (boolean series): Array of true/false for
+                               which asvs are contaminants
+    Returns:
+        contam_asvs (int): Number of features that are
+                           designated as contaminant
+        true_asvs(int): Number of features that are designated as true ASVs
+        unknown_asvs (int): Number of features that are designated as NA
+        percent_asvs (float): Percent of asvs that
+                              are designated as contaminant
+    '''
+    contam_asvs = contams.sum()
+    true_asvs = len(contams) - contam_asvs
+    unknown_asvs = len(decontam_scores['p']) - true_asvs - contam_asvs
+    percent_asvs = contam_asvs / (
+        contam_asvs + true_asvs + unknown_asvs) * 100
+    true_asvs = unknown_asvs + true_asvs
+    return contam_asvs, true_asvs, unknown_asvs, percent_asvs
+
+
+def _read_calcs(filt_read_nums, contams, read_nums):
+    '''Calculates statistics rendered below graph in html, read specific
+    Args:
+        filt_read_nums (int arr): Array of read numbers
+                                  by asv that have Pvalues
+        contams (boolean series): Array of true/false for
+                               which asvs are contaminants
+        read_nums (int arr): Array of read numbers by asv
+    Returns:
+        contam_reads (int): Number of reads that are designated as contaminant
+        true_reads (int): Number of reads that are designated as true ASVs
+        unknown_reads (int): Number of reads that are designated as NA
+        percent_reads (float): Percent of reads that are
+                               designated as contaminant
+    '''
+    contam_reads = filt_read_nums[contams[contams].index].sum()
+    true_reads = filt_read_nums.sum() - contam_reads
+    unknown_reads = read_nums.sum() - true_reads - contam_reads
+    percent_reads = contam_reads / (
+        contam_reads + true_reads + unknown_reads) * 100
+    true_reads = unknown_reads + true_reads
+    return contam_reads, true_reads, unknown_reads, percent_reads
+
+
 # main algorithm
 def decontam_score_viz(output_dir, decontam_scores: pd.DataFrame,
                        table: pd.DataFrame,
@@ -56,6 +142,8 @@ def decontam_score_viz(output_dir, decontam_scores: pd.DataFrame,
     # Indicates whether sequences are provided, and therefore
     # whether a section should be created for them in the viz
     rep_seq_indicator = rep_seqs is not None
+    if rep_seqs:
+        rep_seqs_arr = list(rep_seqs)
 
     # initializes arrays to pass data to the html
     image_paths_arr = []  # array for image paths for render on template
@@ -108,64 +196,59 @@ def decontam_score_viz(output_dir, decontam_scores: pd.DataFrame,
 
         # if rep reqs are not found then the indicator
         # variable changes to False
-        # objects are inalized for true seqe, and contaminant seqs
+        # objects are inalized for true seq, and contaminant seqs
         contam_rep_seqs = []
         true_rep_seqs = []
-        if rep_seq_indicator:
-            for seq in rep_seqs:
+        sequences = {}
+        true_dest = ""
+        contam_dest = ""
+        if rep_seqs:
+            for seq in rep_seqs_arr:
                 if seq.metadata['id'] in contam_indices:
                     contam_rep_seqs.append(seq)
                 elif (seq.metadata['id'] in true_indices) or \
                         (seq.metadata['id'] in nan_indices):
                     true_rep_seqs.append(seq)
-                else:
-                    # TODO:
-                    #  this will only be reached in the batches mode
-                    # the repseq obj is never subset and will cause an
-                    # else statment is used
-                    pass
 
-        # initialized sequences for display in table and fasta downloads
-        sequences = {}
-        if len(table_dict.keys()) > 1:
-            true_dest = str(key) + '_non_contam.fasta'
-            contam_dest = str(key) + '_contam.fasta'
+            # initialized sequences for display in table and fasta downloads
+            if len(table_dict.keys()) > 1:
+                true_dest = str(key) + '_non_contam.fasta'
+                contam_dest = str(key) + '_contam.fasta'
+            else:
+                true_dest = 'non_contam.fasta'
+                contam_dest = 'contam.fasta'
+
+            # generate repseq table and fasta for non contaminants
+            sequences = _write_table_fastas(output_dir, true_dest, sequences,
+                                            true_rep_seqs, "Non-Contaminant",
+                                            decontam_scores,
+                                            read_nums, table)
+
+            # generate repseq table and fasta for contaminants
+            sequences = _write_table_fastas(output_dir, contam_dest, sequences,
+                                            contam_rep_seqs, "Contaminant",
+                                            decontam_scores,
+                                            read_nums, table)
         else:
-            true_dest = 'non_contam.fasta'
-            contam_dest = 'contam.fasta'
-
-        # generate repseq table and fasta for non contaminants
-        sequences = _write_table_fastas(output_dir, true_dest, sequences,
-                                        true_rep_seqs, "Non-Contaminant",
-                                        decontam_scores,
-                                        read_nums, table)
-
-        # generate repseq table and fasta for contaminants
-        sequences = _write_table_fastas(output_dir, contam_dest, sequences,
-                                        contam_rep_seqs, "Contaminant",
-                                        decontam_scores,
-                                        read_nums, table)
+            sequences = _write_table(sequences,
+                                     (list(true_indices) + list(nan_indices)),
+                                     "Non-Contaminant", decontam_scores,
+                                     read_nums, table)
+            sequences = _write_table(sequences, list(contam_indices),
+                                     "Contaminant", decontam_scores,
+                                     read_nums, table)
 
         # sorts sequences to be highest read nums first
         sorted_keys = sorted(
             sequences, key=lambda x: sequences[x]['read_nums'], reverse=True)
 
-        # TODO: these calculations should move to their
-        #  own function to facilitate testing
-        # calculates percentage of contaminant asvs,
-        # true and contaminant asv feature nums
-        contam_asvs = contams.sum()
-        true_asvs = len(contams) - contam_asvs
-        unknown_asvs = len(decontam_scores['p']) - true_asvs - contam_asvs
-        percent_asvs = contam_asvs / (
-                contam_asvs + true_asvs + unknown_asvs) * 100
-        true_asvs = unknown_asvs + true_asvs
-        contam_reads = filt_read_nums[contams[contams].index].sum()
-        true_reads = filt_read_nums.sum() - contam_reads
-        unknown_reads = read_nums.sum() - true_reads - contam_reads
-        percent_reads = contam_reads / (
-                contam_reads + true_reads + unknown_reads) * 100
-        true_reads = unknown_reads + true_reads
+        # ASV calculations
+        contam_asvs, true_asvs, unknown_asvs, percent_asvs = \
+            _asv_calcs(contams, decontam_scores)
+
+        # Read Calculations
+        contam_reads, true_reads, unknown_reads, percent_reads = \
+            _read_calcs(filt_read_nums, contams, read_nums)
 
         # bin width and different color calculations for histogram
         binwidth = bin_size
@@ -281,8 +364,7 @@ def decontam_score_viz(output_dir, decontam_scores: pd.DataFrame,
             'table_keys_arr': sorted_key_arr,
             'feat_or_read': feature_or_read_arr,
     })
-    # sortable JS code sourced from the q2-dada2 plugin
     js = os.path.join(
-        TEMPLATES, 'js', 'tsorter.min.js')
+        TEMPLATES, 'js', 'pag_sorter.min.js')
     os.mkdir(os.path.join(output_dir, 'js'))
-    shutil.copy(js, os.path.join(output_dir, 'js', 'tsorter.min.js'))
+    shutil.copy(js, os.path.join(output_dir, 'js', 'pag_sorter.min.js'))
