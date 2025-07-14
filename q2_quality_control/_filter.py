@@ -65,24 +65,26 @@ def filter_reads(
     ref_gap_open_penalty: str = _filter_defaults['ref_gap_open_penalty'],
     ref_gap_ext_penalty: str = _filter_defaults['ref_gap_ext_penalty'],
     exclude_seqs: str = _filter_defaults['exclude_seqs']
-) -> CasavaOneEightSingleLanePerSampleDirFmt:
+) -> (CasavaOneEightSingleLanePerSampleDirFmt,
+      CasavaOneEightSingleLanePerSampleDirFmt):
     if n_threads == 0:
         n_threads = get_available_cores()
 
     filtered_seqs = CasavaOneEightSingleLanePerSampleDirFmt()
+    other_seqs = CasavaOneEightSingleLanePerSampleDirFmt()
     df = demultiplexed_sequences.manifest
     fastq_paths = [record[1:] for record in df.itertuples()]
 
     for fwd, rev in fastq_paths:
-        _bowtie2_filter(fwd, rev, filtered_seqs, database, n_threads, mode,
-                        sensitivity, ref_gap_open_penalty, ref_gap_ext_penalty,
-                        exclude_seqs)
-    return filtered_seqs
+        _bowtie2_filter(fwd, rev, filtered_seqs, other_seqs, database,
+                        n_threads, mode, sensitivity, ref_gap_open_penalty,
+                        ref_gap_ext_penalty, exclude_seqs)
+    return filtered_seqs, other_seqs
 
 
-def _bowtie2_filter(f_read, r_read, outdir, database, n_threads, mode,
-                    sensitivity, ref_gap_open_penalty, ref_gap_ext_penalty,
-                    exclude_seqs):
+def _bowtie2_filter(f_read, r_read, outdir_keep, outdir_other, database,
+                    n_threads, mode, sensitivity, ref_gap_open_penalty,
+                    ref_gap_ext_penalty, exclude_seqs):
     if mode == 'local':
         mode = '--{0}-{1}'.format(sensitivity, mode)
     else:
@@ -91,8 +93,10 @@ def _bowtie2_filter(f_read, r_read, outdir, database, n_threads, mode,
 
     with tempfile.NamedTemporaryFile() as sam_f:
         samfile_output_path = sam_f.name
-        with tempfile.NamedTemporaryFile() as bam_f:
-            bamfile_output_path = bam_f.name
+        with tempfile.NamedTemporaryFile() as bam_keep, \
+                tempfile.NamedTemporaryFile() as bam_other:
+            bam_keep_path = bam_keep.name
+            bam_other_path = bam_other.name
 
             # align to reference with bowtie
             bowtie_cmd = ['bowtie2', '-p', str(n_threads), mode,
@@ -107,39 +111,60 @@ def _bowtie2_filter(f_read, r_read, outdir, database, n_threads, mode,
 
             # Filter alignment and convert to BAM with samtools
             if exclude_seqs:
-                sam_flags = ['-F', REMOVE_SECONDARY_ALIGNMENTS,
-                             '-f', KEEP_UNMAPPED_SINGLE]
+                keep_flags = ['-F', REMOVE_SECONDARY_ALIGNMENTS,
+                              '-f', KEEP_UNMAPPED_SINGLE]
+                other_flags = ['-F', REMOVE_SECONDARY_OR_UNMAPPED_SINGLE]
                 if r_read is not None:
-                    sam_flags[-1] = KEEP_UNMAPPED_PAIRED
+                    keep_flags[-1] = KEEP_UNMAPPED_PAIRED
+                    other_flags[-1] = REMOVE_SECONDARY_OR_UNMAPPED_PAIRED
             else:
-                sam_flags = ['-F', REMOVE_SECONDARY_OR_UNMAPPED_SINGLE]
+                keep_flags = ['-F', REMOVE_SECONDARY_OR_UNMAPPED_SINGLE]
+                other_flags = ['-F', REMOVE_SECONDARY_ALIGNMENTS,
+                               '-f', KEEP_UNMAPPED_SINGLE]
                 if r_read is not None:
-                    sam_flags[-1] = REMOVE_SECONDARY_OR_UNMAPPED_PAIRED
-            samtools_command = ['samtools', 'view', '-b', samfile_output_path,
-                                '-o', bamfile_output_path, *sam_flags,
-                                '-@', str(n_threads - 1)]
-            _run_command(samtools_command)
-            # sort BAM file by read name so pairs are ordered
+                    keep_flags[-1] = REMOVE_SECONDARY_OR_UNMAPPED_PAIRED
+                    other_flags[-1] = KEEP_UNMAPPED_PAIRED
+            samtools_keep = ['samtools', 'view', '-b', samfile_output_path,
+                             '-o', bam_keep_path, *keep_flags,
+                             '-@', str(n_threads - 1)]
+            _run_command(samtools_keep)
+            samtools_other = ['samtools', 'view', '-b', samfile_output_path,
+                              '-o', bam_other_path, *other_flags,
+                              '-@', str(n_threads - 1)]
+            _run_command(samtools_other)
+            # sort BAM files by read name so pairs are ordered
             if r_read is not None:
-                with tempfile.NamedTemporaryFile() as sort_f:
-                    bamfile_sorted_output_path = sort_f.name
-                    sort_command = [
+                with tempfile.NamedTemporaryFile() as sort_f1, \
+                        tempfile.NamedTemporaryFile() as sort_f2:
+                    sort_keep = [
                         'samtools', 'sort', '-n', '-@', str(n_threads - 1),
-                        '-o', bamfile_sorted_output_path, bamfile_output_path]
-                    _run_command(sort_command)
-                    shutil.copyfile(
-                        bamfile_sorted_output_path, bamfile_output_path)
+                        '-o', sort_f1.name, bam_keep_path]
+                    _run_command(sort_keep)
+                    shutil.copyfile(sort_f1.name, bam_keep_path)
+                    sort_other = [
+                        'samtools', 'sort', '-n', '-@', str(n_threads - 1),
+                        '-o', sort_f2.name, bam_other_path]
+                    _run_command(sort_other)
+                    shutil.copyfile(sort_f2.name, bam_other_path)
 
-            # Convert to FASTQ with samtools
-            fwd = str(outdir.path / os.path.basename(f_read))
+            # Convert BAMs to FASTQ with samtools
+            fwd_keep = str(outdir_keep.path / os.path.basename(f_read))
+            fwd_other = str(outdir_other.path / os.path.basename(f_read))
             if r_read is None:
-                _reads = ['-0', fwd]
+                reads_keep = ['-0', fwd_keep]
+                reads_other = ['-0', fwd_other]
             else:
-                rev = str(outdir.path / os.path.basename(r_read))
-                _reads = ['-0', '/dev/null', '-1', fwd, '-2', rev]
+                rev_keep = str(outdir_keep.path / os.path.basename(r_read))
+                rev_other = str(outdir_other.path / os.path.basename(r_read))
+                reads_keep = ['-0', '/dev/null', '-1', fwd_keep, '-2', rev_keep]
+                reads_other = ['-0', '/dev/null', '-1', fwd_other, '-2', rev_other]
             # -s /dev/null excludes singletons
             # -n keeps samtools from altering header IDs!
-            convert_command = [
-                'samtools', 'fastq', *_reads, '-s', '/dev/null',
-                '-@', str(n_threads - 1), '-n', bamfile_output_path]
-            _run_command(convert_command)
+            convert_keep = [
+                'samtools', 'fastq', *reads_keep, '-s', '/dev/null',
+                '-@', str(n_threads - 1), '-n', bam_keep_path]
+            _run_command(convert_keep)
+            convert_other = [
+                'samtools', 'fastq', *reads_other, '-s', '/dev/null',
+                '-@', str(n_threads - 1), '-n', bam_other_path]
+            _run_command(convert_other)
