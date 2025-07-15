@@ -111,13 +111,6 @@ class TestFilterSingle(QualityControlTestsBase):
                     self.assertTrue(other_id not in seq_ids_that_map)
                     self.assertTrue(other_id in seq_id_that_does_not_map)
 
-        orig = self.demuxed_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
-        obs_ids = _get_ids(obs)
-        other_ids = _get_ids(other)
-        orig_ids = _get_ids(orig)
-        self.assertEqual(obs_ids.union(other_ids), orig_ids)
-        self.assertTrue(obs_ids.isdisjoint(other_ids))
-
         orig = self.demuxed_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
         obs_ids = _get_ids(obs)
         other_ids = _get_ids(other)

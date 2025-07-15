@@ -124,9 +124,9 @@ def _bowtie2_filter(f_read, r_read, outdir_keep, outdir_other, database,
                     keep_flags[-1] = REMOVE_SECONDARY_OR_UNMAPPED_PAIRED
 
             samtools_keep = [
-                'samtools', 'view', '-b', samfile_output_path,
+                'samtools', 'view', '-b',
                 '-o', bam_keep_path, '-U', bam_other_path,
-                *keep_flags, '-@', str(n_threads - 1)
+                *keep_flags, '-@', str(n_threads - 1), samfile_output_path
             ]
             _run_command(samtools_keep)
             # sort BAM files by read name so pairs are ordered
