@@ -109,29 +109,26 @@ def _bowtie2_filter(f_read, r_read, outdir_keep, outdir_other, database,
             bowtie_cmd += ['-S', samfile_output_path]
             _run_command(bowtie_cmd)
 
-            # Filter alignment and convert to BAM with samtools
+            # Filter alignment and simultaneously collect the complement with
+            # samtools. The ``-U`` option writes reads failing the selection
+            # criteria to the provided path, ensuring ``bam_other_path`` is the
+            # exact complement of ``bam_keep_path``.
             if exclude_seqs:
                 keep_flags = ['-F', REMOVE_SECONDARY_ALIGNMENTS,
                               '-f', KEEP_UNMAPPED_SINGLE]
-                other_flags = ['-F', REMOVE_SECONDARY_OR_UNMAPPED_SINGLE]
                 if r_read is not None:
                     keep_flags[-1] = KEEP_UNMAPPED_PAIRED
-                    other_flags[-1] = REMOVE_SECONDARY_OR_UNMAPPED_PAIRED
             else:
                 keep_flags = ['-F', REMOVE_SECONDARY_OR_UNMAPPED_SINGLE]
-                other_flags = ['-F', REMOVE_SECONDARY_ALIGNMENTS,
-                               '-f', KEEP_UNMAPPED_SINGLE]
                 if r_read is not None:
                     keep_flags[-1] = REMOVE_SECONDARY_OR_UNMAPPED_PAIRED
-                    other_flags[-1] = KEEP_UNMAPPED_PAIRED
-            samtools_keep = ['samtools', 'view', '-b', samfile_output_path,
-                             '-o', bam_keep_path, *keep_flags,
-                             '-@', str(n_threads - 1)]
+
+            samtools_keep = [
+                'samtools', 'view', '-b', samfile_output_path,
+                '-o', bam_keep_path, '-U', bam_other_path,
+                *keep_flags, '-@', str(n_threads - 1)
+            ]
             _run_command(samtools_keep)
-            samtools_other = ['samtools', 'view', '-b', samfile_output_path,
-                              '-o', bam_other_path, *other_flags,
-                              '-@', str(n_threads - 1)]
-            _run_command(samtools_other)
             # sort BAM files by read name so pairs are ordered
             if r_read is not None:
                 with tempfile.NamedTemporaryFile() as sort_f1, \

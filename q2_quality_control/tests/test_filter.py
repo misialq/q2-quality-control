@@ -31,7 +31,18 @@ class TestBowtie2Build(QualityControlTestsBase):
 seq_ids_that_map = ['SARS2:6:73:941:1973#', 'SARS2:6:73:231:3321#',
                     'SARS2:6:73:233:3421#', 'SARS2:6:73:552:2457#',
                     'SARS2:6:73:567:7631#']
+
 seq_id_that_does_not_map = 'SARS2:6:73:356:9806#'
+
+
+def _get_ids(view):
+    ids = set()
+    for _, fp in view.sequences.iter_views(FastqGzFormat):
+        with gzip.open(str(fp), 'rt') as fh:
+            for records in itertools.zip_longest(*[fh] * 4):
+                (seq_h, seq, _, qual) = records
+                ids.add(seq_h.strip('@/012\n'))
+    return ids
 
 
 class TestFilterSingle(QualityControlTestsBase):
@@ -68,6 +79,13 @@ class TestFilterSingle(QualityControlTestsBase):
                     self.assertTrue(other_id in seq_ids_that_map)
                     self.assertTrue(other_id not in seq_id_that_does_not_map)
 
+        orig = self.demuxed_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
+        obs_ids = _get_ids(obs)
+        other_ids = _get_ids(other)
+        orig_ids = _get_ids(orig)
+        self.assertEqual(obs_ids.union(other_ids), orig_ids)
+        self.assertTrue(obs_ids.isdisjoint(other_ids))
+
     def test_filter_single_keep_seqs(self):
         obs_art, other_art = self.plugin.methods['filter_reads'](
             self.demuxed_art, self.indexed_genome, exclude_seqs=False)
@@ -92,6 +110,20 @@ class TestFilterSingle(QualityControlTestsBase):
                     other_id = other_seq_h.strip('@/012\n')
                     self.assertTrue(other_id not in seq_ids_that_map)
                     self.assertTrue(other_id in seq_id_that_does_not_map)
+
+        orig = self.demuxed_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
+        obs_ids = _get_ids(obs)
+        other_ids = _get_ids(other)
+        orig_ids = _get_ids(orig)
+        self.assertEqual(obs_ids.union(other_ids), orig_ids)
+        self.assertTrue(obs_ids.isdisjoint(other_ids))
+
+        orig = self.demuxed_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
+        obs_ids = _get_ids(obs)
+        other_ids = _get_ids(other)
+        orig_ids = _get_ids(orig)
+        self.assertEqual(obs_ids.union(other_ids), orig_ids)
+        self.assertTrue(obs_ids.isdisjoint(other_ids))
 
 
 class TestFilterPaired(QualityControlTestsBase):
