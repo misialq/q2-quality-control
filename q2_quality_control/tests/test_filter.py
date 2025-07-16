@@ -31,7 +31,18 @@ class TestBowtie2Build(QualityControlTestsBase):
 seq_ids_that_map = ['SARS2:6:73:941:1973#', 'SARS2:6:73:231:3321#',
                     'SARS2:6:73:233:3421#', 'SARS2:6:73:552:2457#',
                     'SARS2:6:73:567:7631#']
+
 seq_id_that_does_not_map = 'SARS2:6:73:356:9806#'
+
+
+def _get_ids(view):
+    ids = set()
+    for _, fp in view.sequences.iter_views(FastqGzFormat):
+        with gzip.open(str(fp), 'rt') as fh:
+            for records in itertools.zip_longest(*[fh] * 4):
+                (seq_h, seq, _, qual) = records
+                ids.add(seq_h.strip('@/012\n'))
+    return ids
 
 
 class TestFilterSingle(QualityControlTestsBase):
@@ -44,9 +55,11 @@ class TestFilterSingle(QualityControlTestsBase):
             self.get_data_path('sars2-indexed.qza'))
 
     def test_filter_single_exclude_seqs(self):
-        obs_art, = self.plugin.methods['filter_reads'](
+        obs_art, other_art, flag0_art = self.plugin.methods['filter_reads'](
             self.demuxed_art, self.indexed_genome, exclude_seqs=True)
         obs = obs_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
+        other = other_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
+        flag0 = flag0_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
         obs_seqs = obs.sequences.iter_views(FastqGzFormat)
         for _, obs_fp in obs_seqs:
             with gzip.open(str(obs_fp), 'rt') as obs_fh:
@@ -58,11 +71,40 @@ class TestFilterSingle(QualityControlTestsBase):
                     obs_id = obs_seq_h.strip('@/012\n')
                     self.assertTrue(obs_id not in seq_ids_that_map)
                     self.assertTrue(obs_id in seq_id_that_does_not_map)
+        other_seqs = other.sequences.iter_views(FastqGzFormat)
+        for _, other_fp in other_seqs:
+            with gzip.open(str(other_fp), 'rt') as other_fh:
+                for records in itertools.zip_longest(*[other_fh] * 4):
+                    (other_seq_h, other_seq, _, other_qual) = records
+                    other_id = other_seq_h.strip('@/012\n')
+                    self.assertTrue(other_id in seq_ids_that_map)
+                    self.assertTrue(other_id not in seq_id_that_does_not_map)
+
+        orig = self.demuxed_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
+        obs_ids = _get_ids(obs)
+        other_ids = _get_ids(other)
+        flag0_ids = _get_ids(flag0)
+        orig_ids = _get_ids(orig)
+        self.assertEqual(obs_ids.union(other_ids, flag0_ids), orig_ids)
+        self.assertTrue(obs_ids.isdisjoint(other_ids))
+        self.assertTrue(obs_ids.isdisjoint(flag0_ids))
+        self.assertTrue(other_ids.isdisjoint(flag0_ids))
+
+        orig = self.demuxed_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
+        obs_ids = _get_ids(obs)
+        other_ids = _get_ids(other)
+        flag0_ids = _get_ids(flag0)
+        orig_ids = _get_ids(orig)
+        self.assertEqual(obs_ids.union(other_ids, flag0_ids), orig_ids)
+        self.assertTrue(obs_ids.isdisjoint(other_ids))
+        self.assertEqual(flag0_ids, set())
 
     def test_filter_single_keep_seqs(self):
-        obs_art, = self.plugin.methods['filter_reads'](
+        obs_art, other_art, flag0_art = self.plugin.methods['filter_reads'](
             self.demuxed_art, self.indexed_genome, exclude_seqs=False)
         obs = obs_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
+        other = other_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
+        flag0 = flag0_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
         obs_seqs = obs.sequences.iter_views(FastqGzFormat)
         for _, obs_fp in obs_seqs:
             with gzip.open(str(obs_fp), 'rt') as obs_fh:
@@ -74,6 +116,33 @@ class TestFilterSingle(QualityControlTestsBase):
                     obs_id = obs_seq_h.strip('@/012\n')
                     self.assertTrue(obs_id in seq_ids_that_map)
                     self.assertTrue(obs_id not in seq_id_that_does_not_map)
+        other_seqs = other.sequences.iter_views(FastqGzFormat)
+        for _, other_fp in other_seqs:
+            with gzip.open(str(other_fp), 'rt') as other_fh:
+                for records in itertools.zip_longest(*[other_fh] * 4):
+                    (other_seq_h, other_seq, _, other_qual) = records
+                    other_id = other_seq_h.strip('@/012\n')
+                    self.assertTrue(other_id not in seq_ids_that_map)
+                    self.assertTrue(other_id in seq_id_that_does_not_map)
+
+        orig = self.demuxed_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
+        obs_ids = _get_ids(obs)
+        other_ids = _get_ids(other)
+        flag0_ids = _get_ids(flag0)
+        orig_ids = _get_ids(orig)
+        self.assertEqual(obs_ids.union(other_ids, flag0_ids), orig_ids)
+        self.assertTrue(obs_ids.isdisjoint(other_ids))
+        self.assertTrue(obs_ids.isdisjoint(flag0_ids))
+        self.assertTrue(other_ids.isdisjoint(flag0_ids))
+
+        orig = self.demuxed_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
+        obs_ids = _get_ids(obs)
+        other_ids = _get_ids(other)
+        flag0_ids = _get_ids(flag0)
+        orig_ids = _get_ids(orig)
+        self.assertEqual(obs_ids.union(other_ids, flag0_ids), orig_ids)
+        self.assertTrue(obs_ids.isdisjoint(other_ids))
+        self.assertEqual(flag0_ids, set())
 
 
 class TestFilterPaired(QualityControlTestsBase):
@@ -86,9 +155,11 @@ class TestFilterPaired(QualityControlTestsBase):
             self.get_data_path('sars2-indexed.qza'))
 
     def test_filter_paired_exclude_seqs(self):
-        obs_art, = self.plugin.methods['filter_reads'](
+        obs_art, other_art, flag0_art = self.plugin.methods['filter_reads'](
             self.demuxed_art, self.indexed_genome, exclude_seqs=True)
         obs = obs_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
+        other = other_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
+        flag0 = flag0_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
         obs_seqs = obs.sequences.iter_views(FastqGzFormat)
         for _, obs_fp in obs_seqs:
             with gzip.open(str(obs_fp), 'rt') as obs_fh:
@@ -100,11 +171,30 @@ class TestFilterPaired(QualityControlTestsBase):
                     obs_id = obs_seq_h.strip('@/012\n')
                     self.assertTrue(obs_id not in seq_ids_that_map)
                     self.assertTrue(obs_id in seq_id_that_does_not_map)
+        other_seqs = other.sequences.iter_views(FastqGzFormat)
+        for _, other_fp in other_seqs:
+            with gzip.open(str(other_fp), 'rt') as other_fh:
+                for records in itertools.zip_longest(*[other_fh] * 4):
+                    (other_seq_h, other_seq, _, other_qual) = records
+                    other_id = other_seq_h.strip('@/012\n')
+                    self.assertTrue(other_id in seq_ids_that_map)
+                    self.assertTrue(other_id not in seq_id_that_does_not_map)
+        orig = self.demuxed_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
+        obs_ids = _get_ids(obs)
+        other_ids = _get_ids(other)
+        flag0_ids = _get_ids(flag0)
+        orig_ids = _get_ids(orig)
+        self.assertEqual(obs_ids.union(other_ids, flag0_ids), orig_ids)
+        self.assertTrue(obs_ids.isdisjoint(other_ids))
+        self.assertTrue(obs_ids.isdisjoint(flag0_ids))
+        self.assertTrue(other_ids.isdisjoint(flag0_ids))
 
     def test_filter_paired_keep_seqs(self):
-        obs_art, = self.plugin.methods['filter_reads'](
+        obs_art, other_art, flag0_art = self.plugin.methods['filter_reads'](
             self.demuxed_art, self.indexed_genome, exclude_seqs=False)
         obs = obs_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
+        other = other_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
+        flag0 = flag0_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
         obs_seqs = obs.sequences.iter_views(FastqGzFormat)
         for _, obs_fp in obs_seqs:
             with gzip.open(str(obs_fp), 'rt') as obs_fh:
@@ -116,6 +206,23 @@ class TestFilterPaired(QualityControlTestsBase):
                     obs_id = obs_seq_h.strip('@/012\n')
                     self.assertTrue(obs_id in seq_ids_that_map)
                     self.assertTrue(obs_id not in seq_id_that_does_not_map)
+        other_seqs = other.sequences.iter_views(FastqGzFormat)
+        for _, other_fp in other_seqs:
+            with gzip.open(str(other_fp), 'rt') as other_fh:
+                for records in itertools.zip_longest(*[other_fh] * 4):
+                    (other_seq_h, other_seq, _, other_qual) = records
+                    other_id = other_seq_h.strip('@/012\n')
+                    self.assertTrue(other_id not in seq_ids_that_map)
+                    self.assertTrue(other_id in seq_id_that_does_not_map)
+        orig = self.demuxed_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
+        obs_ids = _get_ids(obs)
+        other_ids = _get_ids(other)
+        flag0_ids = _get_ids(flag0)
+        orig_ids = _get_ids(orig)
+        self.assertEqual(obs_ids.union(other_ids, flag0_ids), orig_ids)
+        self.assertTrue(obs_ids.isdisjoint(other_ids))
+        self.assertTrue(obs_ids.isdisjoint(flag0_ids))
+        self.assertTrue(other_ids.isdisjoint(flag0_ids))
 
 
 if __name__ == '__main__':
