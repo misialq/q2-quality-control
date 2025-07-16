@@ -99,9 +99,13 @@ def _bowtie2_filter(f_read, r_read, outdir_keep, outdir_other, outdir_flag0,
     with tempfile.NamedTemporaryFile() as sam_f:
         samfile_output_path = sam_f.name
         with tempfile.NamedTemporaryFile() as bam_keep, \
-                tempfile.NamedTemporaryFile() as bam_other:
+                tempfile.NamedTemporaryFile() as bam_other, \
+                tempfile.NamedTemporaryFile() as flag0_keep_tmp, \
+                tempfile.NamedTemporaryFile() as flag0_other_tmp:
             bam_keep_path = bam_keep.name
             bam_other_path = bam_other.name
+            flag0_keep_path = flag0_keep_tmp.name
+            flag0_other_path = flag0_other_tmp.name
 
             # align to reference with bowtie
             bowtie_cmd = ['bowtie2', '-p', str(n_threads), mode,
@@ -165,29 +169,35 @@ def _bowtie2_filter(f_read, r_read, outdir_keep, outdir_other, outdir_flag0,
             fwd_other = str(outdir_other.path / os.path.basename(f_read))
             flag0_fp = str(outdir_flag0.path / os.path.basename(f_read))
             if r_read is None:
-                reads_keep = ['-0', fwd_keep]
-                reads_other = ['-0', fwd_other]
                 convert_keep = [
-                    'samtools', 'fastq', *reads_keep, '-s', '/dev/null',
-                    '-@', str(n_threads - 1), '-n', bam_keep_path]
+                    'samtools', 'fastq', '-0', flag0_keep_path,
+                    '-s', '/dev/null', '-@', str(n_threads - 1), '-n',
+                    bam_keep_path]
                 _run_command(convert_keep)
                 convert_other = [
-                    'samtools', 'fastq', *reads_other, '-s', '/dev/null',
-                    '-@', str(n_threads - 1), '-n', bam_other_path]
+                    'samtools', 'fastq', '-0', flag0_other_path,
+                    '-s', '/dev/null', '-@', str(n_threads - 1), '-n',
+                    bam_other_path]
                 _run_command(convert_other)
             else:
                 rev_keep = str(outdir_keep.path / os.path.basename(r_read))
                 rev_other = str(outdir_other.path / os.path.basename(r_read))
-                reads_keep = ['-0', '-', '-1', fwd_keep, '-2', rev_keep]
-                reads_other = ['-0', '-', '-1', fwd_other, '-2', rev_other]
-                with gzip.open(flag0_fp, 'wb') as fh:
-                    convert_keep = [
-                        'samtools', 'fastq', *reads_keep, '-s', '/dev/null',
-                        '-@', str(n_threads - 1), '-n', bam_keep_path]
-                    _run_command(convert_keep, stdout=fh)
-                    convert_other = [
-                        'samtools', 'fastq', *reads_other, '-s', '/dev/null',
-                        '-@', str(n_threads - 1), '-n', bam_other_path]
-                    _run_command(convert_other, stdout=fh)
+                convert_keep = [
+                    'samtools', 'fastq', '-0', flag0_keep_path,
+                    '-1', fwd_keep, '-2', rev_keep, '-s', '/dev/null',
+                    '-@', str(n_threads - 1), '-n', bam_keep_path]
+                _run_command(convert_keep)
+                convert_other = [
+                    'samtools', 'fastq', '-0', flag0_other_path,
+                    '-1', fwd_other, '-2', rev_other, '-s', '/dev/null',
+                    '-@', str(n_threads - 1), '-n', bam_other_path]
+                _run_command(convert_other)
+
+            # combine READ_OTHER outputs from both conversions
+            with open(flag0_keep_path, 'rb') as fk, \
+                    open(flag0_other_path, 'rb') as fo, \
+                    gzip.open(flag0_fp, 'wb') as out_fh:
+                shutil.copyfileobj(fk, out_fh)
+                shutil.copyfileobj(fo, out_fh)
             # -s /dev/null excludes singletons
             # -n keeps samtools from altering header IDs!
