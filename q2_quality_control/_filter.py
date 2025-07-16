@@ -9,6 +9,7 @@
 import os
 import shutil
 import tempfile
+import gzip
 
 from qiime2.plugin import get_available_cores
 from q2_types.feature_data import DNAFASTAFormat
@@ -65,26 +66,30 @@ def filter_reads(
     ref_gap_open_penalty: str = _filter_defaults['ref_gap_open_penalty'],
     ref_gap_ext_penalty: str = _filter_defaults['ref_gap_ext_penalty'],
     exclude_seqs: str = _filter_defaults['exclude_seqs']
-) -> (CasavaOneEightSingleLanePerSampleDirFmt,
-      CasavaOneEightSingleLanePerSampleDirFmt):
+) -> (
+        CasavaOneEightSingleLanePerSampleDirFmt,
+        CasavaOneEightSingleLanePerSampleDirFmt,
+        CasavaOneEightSingleLanePerSampleDirFmt):
     if n_threads == 0:
         n_threads = get_available_cores()
 
     filtered_seqs = CasavaOneEightSingleLanePerSampleDirFmt()
     other_seqs = CasavaOneEightSingleLanePerSampleDirFmt()
+    flag0_seqs = CasavaOneEightSingleLanePerSampleDirFmt()
     df = demultiplexed_sequences.manifest
     fastq_paths = [record[1:] for record in df.itertuples()]
 
     for fwd, rev in fastq_paths:
-        _bowtie2_filter(fwd, rev, filtered_seqs, other_seqs, database,
-                        n_threads, mode, sensitivity, ref_gap_open_penalty,
-                        ref_gap_ext_penalty, exclude_seqs)
-    return filtered_seqs, other_seqs
+        _bowtie2_filter(fwd, rev, filtered_seqs, other_seqs, flag0_seqs,
+                        database, n_threads, mode, sensitivity,
+                        ref_gap_open_penalty, ref_gap_ext_penalty,
+                        exclude_seqs)
+    return filtered_seqs, other_seqs, flag0_seqs
 
 
-def _bowtie2_filter(f_read, r_read, outdir_keep, outdir_other, database,
-                    n_threads, mode, sensitivity, ref_gap_open_penalty,
-                    ref_gap_ext_penalty, exclude_seqs):
+def _bowtie2_filter(f_read, r_read, outdir_keep, outdir_other, outdir_flag0,
+                    database, n_threads, mode, sensitivity,
+                    ref_gap_open_penalty, ref_gap_ext_penalty, exclude_seqs):
     if mode == 'local':
         mode = '--{0}-{1}'.format(sensitivity, mode)
     else:
@@ -158,21 +163,31 @@ def _bowtie2_filter(f_read, r_read, outdir_keep, outdir_other, database,
             # Convert BAMs to FASTQ with samtools
             fwd_keep = str(outdir_keep.path / os.path.basename(f_read))
             fwd_other = str(outdir_other.path / os.path.basename(f_read))
+            flag0_fp = str(outdir_flag0.path / os.path.basename(f_read))
             if r_read is None:
                 reads_keep = ['-0', fwd_keep]
                 reads_other = ['-0', fwd_other]
+                convert_keep = [
+                    'samtools', 'fastq', *reads_keep, '-s', '/dev/null',
+                    '-@', str(n_threads - 1), '-n', bam_keep_path]
+                _run_command(convert_keep)
+                convert_other = [
+                    'samtools', 'fastq', *reads_other, '-s', '/dev/null',
+                    '-@', str(n_threads - 1), '-n', bam_other_path]
+                _run_command(convert_other)
             else:
                 rev_keep = str(outdir_keep.path / os.path.basename(r_read))
                 rev_other = str(outdir_other.path / os.path.basename(r_read))
-                reads_keep = ['-0', '/dev/null', '-1', fwd_keep, '-2', rev_keep]
-                reads_other = ['-0', '/dev/null', '-1', fwd_other, '-2', rev_other]
+                reads_keep = ['-0', '-', '-1', fwd_keep, '-2', rev_keep]
+                reads_other = ['-0', '-', '-1', fwd_other, '-2', rev_other]
+                with gzip.open(flag0_fp, 'wb') as fh:
+                    convert_keep = [
+                        'samtools', 'fastq', *reads_keep, '-s', '/dev/null',
+                        '-@', str(n_threads - 1), '-n', bam_keep_path]
+                    _run_command(convert_keep, stdout=fh)
+                    convert_other = [
+                        'samtools', 'fastq', *reads_other, '-s', '/dev/null',
+                        '-@', str(n_threads - 1), '-n', bam_other_path]
+                    _run_command(convert_other, stdout=fh)
             # -s /dev/null excludes singletons
             # -n keeps samtools from altering header IDs!
-            convert_keep = [
-                'samtools', 'fastq', *reads_keep, '-s', '/dev/null',
-                '-@', str(n_threads - 1), '-n', bam_keep_path]
-            _run_command(convert_keep)
-            convert_other = [
-                'samtools', 'fastq', *reads_other, '-s', '/dev/null',
-                '-@', str(n_threads - 1), '-n', bam_other_path]
-            _run_command(convert_other)

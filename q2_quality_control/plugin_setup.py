@@ -68,7 +68,10 @@ filter_output = {
     'filtered_sequences': 'The resulting filtered sequences.',
     'other_sequences': (
         'The complement set of sequences that were not returned as '
-        'filtered_sequences.')}
+        'filtered_sequences.'),
+    'flag0_sequences': (
+        'Reads designated READ_OTHER during FASTQ conversion. These reads '
+        'may be unpaired or otherwise not labeled as forward or reverse.')}
 
 filter_parameters = {
     'n_threads': Threads,
@@ -282,7 +285,8 @@ plugin.methods.register_function(
             'database': Bowtie2Index},
     parameters=filter_parameters,
     outputs=[('filtered_sequences', SampleData[T]),
-             ('other_sequences', SampleData[T])],
+             ('other_sequences', SampleData[T]),
+             ('flag0_sequences', SampleData[SequencesWithQuality])],
     input_descriptions=filter_input,
     parameter_descriptions=filter_parameter_descriptions,
     output_descriptions=filter_output,
