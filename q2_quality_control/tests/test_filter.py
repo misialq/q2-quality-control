@@ -34,6 +34,17 @@ seq_ids_that_map = ['SARS2:6:73:941:1973#', 'SARS2:6:73:231:3321#',
 seq_id_that_does_not_map = 'SARS2:6:73:356:9806#'
 
 
+def _iter_ids(dirfmt):
+    for _, obs_fp in dirfmt.sequences.iter_views(FastqGzFormat):
+        with gzip.open(str(obs_fp), 'rt') as obs_fh:
+            for records in itertools.zip_longest(*[obs_fh] * 4):
+                if records[0] is None:
+                    break
+                obs_seq_h = records[0]
+                obs_id = obs_seq_h.strip('@/012\n')
+                yield obs_id
+
+
 class TestFilterSingle(QualityControlTestsBase):
 
     def setUp(self):
@@ -44,36 +55,52 @@ class TestFilterSingle(QualityControlTestsBase):
             self.get_data_path('sars2-indexed.qza'))
 
     def test_filter_single_exclude_seqs(self):
-        obs_art, = self.plugin.methods['filter_reads'](
+        obs_art, comp_art, singleton_art = self.plugin.methods['filter_reads'](
             self.demuxed_art, self.indexed_genome, exclude_seqs=True)
         obs = obs_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
-        obs_seqs = obs.sequences.iter_views(FastqGzFormat)
-        for _, obs_fp in obs_seqs:
-            with gzip.open(str(obs_fp), 'rt') as obs_fh:
-                self.assertNotEqual(len(obs_fh.readlines()), 0)
-                # Iterate over expected and observed reads, side-by-side
-                for records in itertools.zip_longest(*[obs_fh] * 4):
-                    (obs_seq_h, obs_seq, _, obs_qual) = records
-                    # Make sure seqs that map to genome were removed
-                    obs_id = obs_seq_h.strip('@/012\n')
-                    self.assertTrue(obs_id not in seq_ids_that_map)
-                    self.assertTrue(obs_id in seq_id_that_does_not_map)
+        comp = comp_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
+        singleton = singleton_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
+
+        obs_ids = list(_iter_ids(obs))
+        self.assertNotEqual(len(obs_ids), 0)
+        for obs_id in obs_ids:
+            # Make sure seqs that map to genome were removed
+            self.assertTrue(obs_id not in seq_ids_that_map)
+            self.assertTrue(obs_id in seq_id_that_does_not_map)
+
+        comp_ids = list(_iter_ids(comp))
+        self.assertNotEqual(len(comp_ids), 0)
+        for comp_id in comp_ids:
+            self.assertTrue(comp_id in seq_ids_that_map)
+            self.assertTrue(comp_id not in seq_id_that_does_not_map)
+
+        singleton_ids = list(_iter_ids(singleton))
+        for singleton_id in singleton_ids:
+            self.assertTrue(singleton_id not in obs_ids)
 
     def test_filter_single_keep_seqs(self):
-        obs_art, = self.plugin.methods['filter_reads'](
+        obs_art, comp_art, singleton_art = self.plugin.methods['filter_reads'](
             self.demuxed_art, self.indexed_genome, exclude_seqs=False)
         obs = obs_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
-        obs_seqs = obs.sequences.iter_views(FastqGzFormat)
-        for _, obs_fp in obs_seqs:
-            with gzip.open(str(obs_fp), 'rt') as obs_fh:
-                self.assertNotEqual(len(obs_fh.readlines()), 0)
-                # Iterate over expected and observed reads, side-by-side
-                for records in itertools.zip_longest(*[obs_fh] * 4):
-                    (obs_seq_h, obs_seq, _, obs_qual) = records
-                    # Make sure seqs that do not map to genome were removed
-                    obs_id = obs_seq_h.strip('@/012\n')
-                    self.assertTrue(obs_id in seq_ids_that_map)
-                    self.assertTrue(obs_id not in seq_id_that_does_not_map)
+        comp = comp_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
+        singleton = singleton_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
+
+        obs_ids = list(_iter_ids(obs))
+        self.assertNotEqual(len(obs_ids), 0)
+        for obs_id in obs_ids:
+            # Make sure seqs that do not map to genome were removed
+            self.assertTrue(obs_id in seq_ids_that_map)
+            self.assertTrue(obs_id not in seq_id_that_does_not_map)
+
+        comp_ids = list(_iter_ids(comp))
+        self.assertNotEqual(len(comp_ids), 0)
+        for comp_id in comp_ids:
+            self.assertTrue(comp_id not in seq_ids_that_map)
+            self.assertTrue(comp_id in seq_id_that_does_not_map)
+
+        singleton_ids = list(_iter_ids(singleton))
+        for singleton_id in singleton_ids:
+            self.assertTrue(singleton_id not in obs_ids)
 
 
 class TestFilterPaired(QualityControlTestsBase):
@@ -86,36 +113,52 @@ class TestFilterPaired(QualityControlTestsBase):
             self.get_data_path('sars2-indexed.qza'))
 
     def test_filter_paired_exclude_seqs(self):
-        obs_art, = self.plugin.methods['filter_reads'](
+        obs_art, comp_art, singleton_art = self.plugin.methods['filter_reads'](
             self.demuxed_art, self.indexed_genome, exclude_seqs=True)
         obs = obs_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
-        obs_seqs = obs.sequences.iter_views(FastqGzFormat)
-        for _, obs_fp in obs_seqs:
-            with gzip.open(str(obs_fp), 'rt') as obs_fh:
-                self.assertNotEqual(len(obs_fh.readlines()), 0)
-                # Iterate over expected and observed reads, side-by-side
-                for records in itertools.zip_longest(*[obs_fh] * 4):
-                    (obs_seq_h, obs_seq, _, obs_qual) = records
-                    # Make sure seqs that map to genome were removed
-                    obs_id = obs_seq_h.strip('@/012\n')
-                    self.assertTrue(obs_id not in seq_ids_that_map)
-                    self.assertTrue(obs_id in seq_id_that_does_not_map)
+        comp = comp_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
+        singleton = singleton_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
+
+        obs_ids = list(_iter_ids(obs))
+        self.assertNotEqual(len(obs_ids), 0)
+        for obs_id in obs_ids:
+            # Make sure seqs that map to genome were removed
+            self.assertTrue(obs_id not in seq_ids_that_map)
+            self.assertTrue(obs_id in seq_id_that_does_not_map)
+
+        comp_ids = list(_iter_ids(comp))
+        self.assertNotEqual(len(comp_ids), 0)
+        for comp_id in comp_ids:
+            self.assertTrue(comp_id in seq_ids_that_map)
+            self.assertTrue(comp_id not in seq_id_that_does_not_map)
+
+        singleton_ids = list(_iter_ids(singleton))
+        for singleton_id in singleton_ids:
+            self.assertTrue(singleton_id not in obs_ids)
 
     def test_filter_paired_keep_seqs(self):
-        obs_art, = self.plugin.methods['filter_reads'](
+        obs_art, comp_art, singleton_art = self.plugin.methods['filter_reads'](
             self.demuxed_art, self.indexed_genome, exclude_seqs=False)
         obs = obs_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
-        obs_seqs = obs.sequences.iter_views(FastqGzFormat)
-        for _, obs_fp in obs_seqs:
-            with gzip.open(str(obs_fp), 'rt') as obs_fh:
-                self.assertNotEqual(len(obs_fh.readlines()), 0)
-                # Iterate over expected and observed reads, side-by-side
-                for records in itertools.zip_longest(*[obs_fh] * 4):
-                    (obs_seq_h, obs_seq, _, obs_qual) = records
-                    # Make sure seqs that do not map to genome were removed
-                    obs_id = obs_seq_h.strip('@/012\n')
-                    self.assertTrue(obs_id in seq_ids_that_map)
-                    self.assertTrue(obs_id not in seq_id_that_does_not_map)
+        comp = comp_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
+        singleton = singleton_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
+
+        obs_ids = list(_iter_ids(obs))
+        self.assertNotEqual(len(obs_ids), 0)
+        for obs_id in obs_ids:
+            # Make sure seqs that do not map to genome were removed
+            self.assertTrue(obs_id in seq_ids_that_map)
+            self.assertTrue(obs_id not in seq_id_that_does_not_map)
+
+        comp_ids = list(_iter_ids(comp))
+        self.assertNotEqual(len(comp_ids), 0)
+        for comp_id in comp_ids:
+            self.assertTrue(comp_id not in seq_ids_that_map)
+            self.assertTrue(comp_id in seq_id_that_does_not_map)
+
+        singleton_ids = list(_iter_ids(singleton))
+        for singleton_id in singleton_ids:
+            self.assertTrue(singleton_id not in obs_ids)
 
 
 if __name__ == '__main__':

@@ -64,7 +64,17 @@ taxa_inputs_descriptions = {
 
 filter_input = {'demultiplexed_sequences': 'The sequences to be trimmed.',
                 'database': 'Bowtie2 indexed database.'}
-filter_output = {'filtered_sequences': 'The resulting filtered sequences.'}
+filter_output = {
+    'filtered_sequences': 'The resulting filtered sequences.',
+    'complement_sequences': (
+        'Sequences not present in filtered_sequences. For paired-end data, '
+        'this output contains only paired reads; unpaired reads are written '
+        'to singleton_sequences.'),
+    'singleton_sequences': (
+        'Unpaired reads from filtered/complement outputs. Together with '
+        'complement_sequences, these reads form the complement of '
+        'filtered_sequences.')
+}
 
 filter_parameters = {
     'n_threads': Threads,
@@ -277,7 +287,9 @@ plugin.methods.register_function(
     inputs={'demultiplexed_sequences': SampleData[T],
             'database': Bowtie2Index},
     parameters=filter_parameters,
-    outputs=[('filtered_sequences', SampleData[T])],
+    outputs=[('filtered_sequences', SampleData[T]),
+             ('complement_sequences', SampleData[T]),
+             ('singleton_sequences', SampleData[SequencesWithQuality])],
     input_descriptions=filter_input,
     parameter_descriptions=filter_parameter_descriptions,
     output_descriptions=filter_output,
@@ -288,7 +300,10 @@ plugin.methods.register_function(
         'method can be used to filter out human DNA sequences and other '
         'contaminants in any FASTQ sequence data (e.g., shotgun genome or '
         'amplicon sequence data), or alternatively (when exclude_seqs is '
-        'False) to only keep sequences that do align to the reference.'),
+        'False) to only keep sequences that do align to the reference. '
+        'For paired-end data, unpaired reads are emitted to '
+        'singleton_sequences, and complement_sequences plus '
+        'singleton_sequences are the inverse of filtered_sequences.'),
     citations=[citations['langmead2012fast'], citations['heng2009samtools']]
 )
 
