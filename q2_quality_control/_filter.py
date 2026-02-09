@@ -9,6 +9,7 @@
 import gzip
 import os
 import shutil
+import subprocess
 import tempfile
 
 from qiime2.plugin import get_available_cores
@@ -132,6 +133,11 @@ def _bowtie2_filter(f_read, r_read, filtered_outdir, complement_outdir,
                     *filter_flags, '-@', str(max(n_threads - 1, 0))]
                 _run_command(samtools_filter_cmd)
 
+                filtered_count = _count_bam_records(filtered_bam_path,
+                                                    n_threads)
+                complement_count = _count_bam_records(complement_bam_path,
+                                                      n_threads)
+
                 # sort BAM files by read name so pairs are ordered
                 if r_read is not None:
                     _sort_bam_by_name(filtered_bam_path, n_threads)
@@ -152,7 +158,8 @@ def _bowtie2_filter(f_read, r_read, filtered_outdir, complement_outdir,
                         complement_bam_path, complement_fwd, n_threads)
                     _ensure_empty_fastq(singleton_path)
                     _log_counts_single_end(
-                        f_read, filtered_fwd, complement_fwd, singleton_path)
+                        f_read, filtered_fwd, complement_fwd, singleton_path,
+                        filtered_count, complement_count, 0)
                     return
 
                 filtered_rev = str(filtered_outdir.path /
@@ -172,15 +179,30 @@ def _bowtie2_filter(f_read, r_read, filtered_outdir, complement_outdir,
                     complement_bam_path, complement_fwd, complement_rev,
                     complement_singleton_paths, n_threads)
 
+                filtered_singleton_count = _count_many_fastq_reads(
+                    filtered_singleton_paths)
+                complement_singleton_count = _count_many_fastq_reads(
+                    complement_singleton_paths)
                 _concat_files(
                     filtered_singleton_paths + complement_singleton_paths,
                     singleton_path)
                 _cleanup_files(
                     filtered_singleton_paths + complement_singleton_paths)
 
+                filtered_pair_count = _pair_count_from_totals(
+                    filtered_count, filtered_singleton_count)
+                if filtered_pair_count is None:
+                    filtered_pair_count = _count_fastq_reads(filtered_fwd)
+                complement_pair_count = _pair_count_from_totals(
+                    complement_count, complement_singleton_count)
+                if complement_pair_count is None:
+                    complement_pair_count = _count_fastq_reads(
+                        complement_fwd)
                 _log_counts_paired(
                     f_read, filtered_fwd, filtered_rev, complement_fwd,
-                    complement_rev, singleton_path)
+                    complement_rev, singleton_path, filtered_pair_count,
+                    complement_pair_count,
+                    filtered_singleton_count + complement_singleton_count)
 
 
 def _get_filter_flags(exclude_seqs, is_paired):
@@ -273,27 +295,49 @@ def _count_fastq_reads(path):
         return sum(1 for _ in fh) // 4
 
 
+def _count_many_fastq_reads(paths):
+    return sum(_count_fastq_reads(path) for path in paths)
+
+
+def _count_bam_records(path, n_threads):
+    result = subprocess.run(
+        ['samtools', 'view', '-c', '-@', str(max(n_threads - 1, 0)), path],
+        check=True, capture_output=True, text=True)
+    return int(result.stdout.strip())
+
+
+def _pair_count_from_totals(total_count, singleton_count):
+    paired_record_count = total_count - singleton_count
+    if paired_record_count < 0:
+        return None
+    if paired_record_count % 2 != 0:
+        return None
+    return paired_record_count // 2
+
+
 def _log_counts_single_end(f_read, filtered_path, complement_path,
-                           singleton_path):
+                           singleton_path, filtered_count,
+                           complement_count, singleton_count):
     print('filter_reads output counts for %s' % os.path.basename(f_read))
     print('filtered_sequences: %d reads -> %s' % (
-        _count_fastq_reads(filtered_path), filtered_path))
+        filtered_count, filtered_path))
     print('complement_sequences: %d reads -> %s' % (
-        _count_fastq_reads(complement_path), complement_path))
+        complement_count, complement_path))
     print('singleton_sequences: %d reads -> %s' % (
-        _count_fastq_reads(singleton_path), singleton_path))
+        singleton_count, singleton_path))
 
 
 def _log_counts_paired(f_read, filtered_fwd, filtered_rev, complement_fwd,
-                       complement_rev, singleton_path):
+                       complement_rev, singleton_path, filtered_pair_count,
+                       complement_pair_count, singleton_count):
     print('filter_reads output counts for %s' % os.path.basename(f_read))
     print('filtered_sequences forward: %d reads -> %s' % (
-        _count_fastq_reads(filtered_fwd), filtered_fwd))
+        filtered_pair_count, filtered_fwd))
     print('filtered_sequences reverse: %d reads -> %s' % (
-        _count_fastq_reads(filtered_rev), filtered_rev))
+        filtered_pair_count, filtered_rev))
     print('complement_sequences forward: %d reads -> %s' % (
-        _count_fastq_reads(complement_fwd), complement_fwd))
+        complement_pair_count, complement_fwd))
     print('complement_sequences reverse: %d reads -> %s' % (
-        _count_fastq_reads(complement_rev), complement_rev))
+        complement_pair_count, complement_rev))
     print('singleton_sequences: %d reads -> %s' % (
-        _count_fastq_reads(singleton_path), singleton_path))
+        singleton_count, singleton_path))

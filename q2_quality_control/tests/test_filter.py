@@ -9,6 +9,7 @@
 import gzip
 import itertools
 import unittest
+from collections import Counter
 
 from q2_types.per_sample_sequences import (
     SingleLanePerSampleSingleEndFastqDirFmt,
@@ -35,14 +36,28 @@ seq_id_that_does_not_map = 'SARS2:6:73:356:9806#'
 
 
 def _iter_ids(dirfmt):
+    for header in _iter_headers(dirfmt):
+        yield header.strip('/012')
+
+
+def _iter_headers(dirfmt):
     for _, obs_fp in dirfmt.sequences.iter_views(FastqGzFormat):
         with gzip.open(str(obs_fp), 'rt') as obs_fh:
             for records in itertools.zip_longest(*[obs_fh] * 4):
                 if records[0] is None:
                     break
                 obs_seq_h = records[0]
-                obs_id = obs_seq_h.strip('@/012\n')
-                yield obs_id
+                yield obs_seq_h.strip().split()[0].lstrip('@')
+
+
+def _assert_partition(expected_dirfmt, *observed_dirfmts):
+    expected = Counter(_iter_headers(expected_dirfmt))
+    observed = Counter()
+    for dirfmt in observed_dirfmts:
+        observed += Counter(_iter_headers(dirfmt))
+    if expected != observed:
+        raise AssertionError(
+            f"Partition mismatch. expected={expected}, observed={observed}")
 
 
 class TestFilterSingle(QualityControlTestsBase):
@@ -57,6 +72,7 @@ class TestFilterSingle(QualityControlTestsBase):
     def test_filter_single_exclude_seqs(self):
         obs_art, comp_art, singleton_art = self.plugin.methods['filter_reads'](
             self.demuxed_art, self.indexed_genome, exclude_seqs=True)
+        expected = self.demuxed_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
         obs = obs_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
         comp = comp_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
         singleton = singleton_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
@@ -75,12 +91,13 @@ class TestFilterSingle(QualityControlTestsBase):
             self.assertTrue(comp_id not in seq_id_that_does_not_map)
 
         singleton_ids = list(_iter_ids(singleton))
-        for singleton_id in singleton_ids:
-            self.assertTrue(singleton_id not in obs_ids)
+        self.assertEqual(len(singleton_ids), 0)
+        _assert_partition(expected, obs, comp, singleton)
 
     def test_filter_single_keep_seqs(self):
         obs_art, comp_art, singleton_art = self.plugin.methods['filter_reads'](
             self.demuxed_art, self.indexed_genome, exclude_seqs=False)
+        expected = self.demuxed_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
         obs = obs_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
         comp = comp_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
         singleton = singleton_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
@@ -99,8 +116,8 @@ class TestFilterSingle(QualityControlTestsBase):
             self.assertTrue(comp_id in seq_id_that_does_not_map)
 
         singleton_ids = list(_iter_ids(singleton))
-        for singleton_id in singleton_ids:
-            self.assertTrue(singleton_id not in obs_ids)
+        self.assertEqual(len(singleton_ids), 0)
+        _assert_partition(expected, obs, comp, singleton)
 
 
 class TestFilterPaired(QualityControlTestsBase):
@@ -115,6 +132,7 @@ class TestFilterPaired(QualityControlTestsBase):
     def test_filter_paired_exclude_seqs(self):
         obs_art, comp_art, singleton_art = self.plugin.methods['filter_reads'](
             self.demuxed_art, self.indexed_genome, exclude_seqs=True)
+        expected = self.demuxed_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
         obs = obs_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
         comp = comp_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
         singleton = singleton_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
@@ -132,13 +150,12 @@ class TestFilterPaired(QualityControlTestsBase):
             self.assertTrue(comp_id in seq_ids_that_map)
             self.assertTrue(comp_id not in seq_id_that_does_not_map)
 
-        singleton_ids = list(_iter_ids(singleton))
-        for singleton_id in singleton_ids:
-            self.assertTrue(singleton_id not in obs_ids)
+        _assert_partition(expected, obs, comp, singleton)
 
     def test_filter_paired_keep_seqs(self):
         obs_art, comp_art, singleton_art = self.plugin.methods['filter_reads'](
             self.demuxed_art, self.indexed_genome, exclude_seqs=False)
+        expected = self.demuxed_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
         obs = obs_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
         comp = comp_art.view(SingleLanePerSamplePairedEndFastqDirFmt)
         singleton = singleton_art.view(SingleLanePerSampleSingleEndFastqDirFmt)
@@ -156,9 +173,7 @@ class TestFilterPaired(QualityControlTestsBase):
             self.assertTrue(comp_id not in seq_ids_that_map)
             self.assertTrue(comp_id in seq_id_that_does_not_map)
 
-        singleton_ids = list(_iter_ids(singleton))
-        for singleton_id in singleton_ids:
-            self.assertTrue(singleton_id not in obs_ids)
+        _assert_partition(expected, obs, comp, singleton)
 
 
 if __name__ == '__main__':
