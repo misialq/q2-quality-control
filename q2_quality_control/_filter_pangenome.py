@@ -6,33 +6,39 @@
 # The full license is in the file LICENSE, distributed with this software.
 # ----------------------------------------------------------------------------
 import glob
+import hashlib
 import os
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
+
+import requests
 
 from q2_quality_control._utilities import _run_command
 
 EBI_SERVER_URL = (
     "ftp://ftp.sra.ebi.ac.uk/vol1/analysis/ERZ127/ERZ12792464/hprc-v1.0-pggb.gfa.gz"
 )
+NCBI_DATASETS_URL = (
+    "https://api.ncbi.nlm.nih.gov/datasets/v2/genome/accession/"
+    "GCF_000001405.40/download"
+)
 
 
-def _fetch_and_extract_pangenome(uri: str, dest_dir: str):
+def _fetch_and_extract_pangenome(dest_dir: str):
     """
     Fetches and extracts the human pangenome GFA file.
 
     Args:
-        uri (str): The URI of the genome to fetch. Should be in the form
-                    ftp://host/path/to/file.
         dest_dir (str): The directory where the data will be saved.
     """
-    filename = os.path.basename(uri)
+    filename = os.path.basename(EBI_SERVER_URL)
     dest_fp = os.path.join(dest_dir, filename)
 
     try:
         print("Fetching the GFA file...")
-        _run_command(["wget", uri, "-q", "-O", dest_fp])
+        _run_command(["wget", EBI_SERVER_URL, "-q", "-O", dest_fp])
     except Exception as e:
         raise Exception(
             "Unable to connect to the server. Please try again later. "
@@ -66,30 +72,87 @@ def _extract_fasta_from_gfa(gfa_fp: str, fasta_fp: str):
     os.remove(gfa_fp)
 
 
-def _fetch_and_extract_grch38(get_ncbi_genomes: callable, dest_dir: str):
+def _verify_md5(file_fp: str, checksum_fp: str, key: str):
+    """
+    Verifies a file against an expected MD5 hash listed in a checksum file.
+
+    Args:
+        file_fp (str): Path to the file whose hash should be verified.
+        checksum_fp (str): Path to the checksum file containing MD5 hashes.
+        key (str): Substring identifying the relevant line in the checksum
+            file (typically the file's path within the archive).
+
+    Raises:
+        ValueError: If no checksum is found for ``key`` or the computed
+            hash does not match the expected one.
+    """
+    expected_hash = None
+    for line in Path(checksum_fp).read_text().splitlines():
+        if key in line:
+            expected_hash = line.split()[0]
+            break
+
+    if expected_hash is None:
+        raise ValueError(f"No checksum found for {key}.")
+
+    with open(file_fp, "rb") as f:
+        digest = hashlib.file_digest(f, "md5").hexdigest()
+
+    if digest != expected_hash:
+        raise ValueError(
+            "The downloaded file does not match the expected MD5 hash. "
+            "Please try downloading again."
+        )
+
+
+def _fetch_and_extract_grch38(dest_dir: str):
     """
     Fetches and extracts the GRCh38 human reference genome.
 
-    This function uses the RESCRIPt method provided through the callable
-    `get_ncbi_genomes` to fetch the GRCh38 human reference genome.
-    The fetched 'dna-sequences.fasta' file is renamed to 'grch38.fasta'.
+    This function uses the NCBI Datasets API to download a zip file
+    containing the GRCh38 human reference genome. The correctness of the
+    retrieved data is verified by comparing the MD5 hash of the downloaded
+    data file against the checksum provided in a separate file. The
+    fetched genome file is renamed to 'grch38.fasta'.
 
     Args:
-        get_ncbi_genomes (callable): A function to fetch genomes from NCBI.
         dest_dir (str): The directory where the genome data will be saved.
     """
-    results = get_ncbi_genomes(
-        taxa=["Homo sapiens"],
-        only_reference=True,
-        assembly_levels=["chromosome"],
-        assembly_source="refseq",
-        only_genomic=False,
+    query_params = {
+        "include_annotation_type": ["GENOME_FASTA"],
+        "hydrated": "FULLY_HYDRATED"
+    }
+    zip_fp = os.path.join(dest_dir, "data.zip")
+
+    try:
+        with requests.get(
+                NCBI_DATASETS_URL, params=query_params, stream=True
+        ) as response:
+            response.raise_for_status()
+
+            print(f"Fetching the GRCh38 genome file from {response.url}...")
+            with open(zip_fp, "wb") as fp:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        fp.write(chunk)
+    except requests.exceptions.ChunkedEncodingError as e:
+        raise Exception(
+            "The download failed. Please try again later. "
+            f"The error was: {e}"
+        )
+
+    print("Download finished. Extracting files...")
+    _run_command(["unzip", zip_fp, "-d", dest_dir])
+
+    genome_rel_fp = os.path.join(
+        "ncbi_dataset", "data", "GCF_000001405.40",
+        "GCF_000001405.40_GRCh38.p14_genomic.fna"
     )
-    results.genome_assemblies.export_data(dest_dir)
-    shutil.move(
-        os.path.join(dest_dir, "dna-sequences.fasta"),
-        os.path.join(dest_dir, "grch38.fasta"),
-    )
+    genome_fp = os.path.join(dest_dir, genome_rel_fp)
+    checksum_fp = os.path.join(dest_dir, "md5sum.txt")
+
+    _verify_md5(genome_fp, checksum_fp, genome_rel_fp)
+    shutil.move(genome_fp, os.path.join(dest_dir, "grch38.fasta"))
 
 
 def _combine_fasta_files(*fasta_in_fp, fasta_out_fp):
@@ -124,15 +187,14 @@ def construct_human_pangenome_index(ctx, threads=1):
     This action will fetch the human pangenome and GRCh38 reference genome,
     combine them into a single FASTA file, and generate a Bowtie 2 index.
     """
-    get_ncbi_genomes = ctx.get_action("rescript", "get_ncbi_genomes")
     build_index = ctx.get_action("quality_control", "bowtie2_build")
 
     with tempfile.TemporaryDirectory() as tmp:
         print("Fetching the human pangenome GFA file...")
-        _fetch_and_extract_pangenome(EBI_SERVER_URL, tmp)
+        _fetch_and_extract_pangenome(tmp)
 
         print("Fetching the human GRCh38 reference genome...")
-        _fetch_and_extract_grch38(get_ncbi_genomes, tmp)
+        _fetch_and_extract_grch38(tmp)
 
         print("Converting pangenome GFA to FASTA...")
         gfa_fp = glob.glob(os.path.join(tmp, "*.gfa"))[0]
