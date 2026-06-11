@@ -24,7 +24,7 @@ from q2_quality_control._filter_pangenome import (
 from qiime2.plugin.testing import TestPluginBase
 
 
-class TestMAGFiltering(TestPluginBase):
+class TestPangenomeFiltering(TestPluginBase):
     package = "q2_quality_control.tests"
 
     @patch("shutil.move")
@@ -63,7 +63,7 @@ class TestMAGFiltering(TestPluginBase):
         with self.assertRaisesRegex(Exception, "Failed to extract"):
             _extract_fasta_from_gfa("/some/gfa", fasta_fp)
 
-    @patch("q2_annotate.filtering.filter_pangenome.run_command")
+    @patch("q2_quality_control._filter_pangenome._run_command")
     def test_fetch_and_extract_pangenome(self, p1):
         uri = "http://hello.org/file123.gz"
         _fetch_and_extract_pangenome(uri, "/some/where")
@@ -75,7 +75,7 @@ class TestMAGFiltering(TestPluginBase):
             ]
         )
 
-    @patch("q2_annotate.filtering.filter_pangenome.run_command", side_effect=OSError)
+    @patch("q2_quality_control._filter_pangenome._run_command", side_effect=OSError)
     def test_fetch_and_extract_pangenome_error(self, p1):
         with self.assertRaisesRegex(Exception, "Unable to connect"):
             _fetch_and_extract_pangenome("http://hello.org", "/some/where")
@@ -115,9 +115,9 @@ class TestMAGFiltering(TestPluginBase):
         with self.assertRaisesRegex(Exception, "Failed to add the /fake/file"):
             _combine_fasta_files("/fake/file", fasta_out_fp=obs)
 
-    @patch("q2_annotate.filtering.filter_pangenome._fetch_and_extract_pangenome")
-    @patch("q2_annotate.filtering.filter_pangenome._fetch_and_extract_grch38")
-    @patch("q2_annotate.filtering.filter_pangenome._extract_fasta_from_gfa")
+    @patch("q2_quality_control._filter_pangenome._fetch_and_extract_pangenome")
+    @patch("q2_quality_control._filter_pangenome._fetch_and_extract_grch38")
+    @patch("q2_quality_control._filter_pangenome._extract_fasta_from_gfa")
     def test_construct_pangenome_index(
         self, mock_extract_fasta, mock_fetch_grch38, mock_fetch_pangenome
     ):
@@ -201,7 +201,7 @@ class TestMAGFiltering(TestPluginBase):
             mock_filtered_reads_result,
         )
         mock_index = MagicMock()
-        ctx.get_action("annotate", "construct_pangenome_index").return_value = (
+        ctx.get_action("quality_control", "construct_pangenome_index").return_value = (
             mock_index,
         )
 
@@ -212,7 +212,7 @@ class TestMAGFiltering(TestPluginBase):
         )
 
         # Assertions
-        ctx.get_action.assert_any_call("annotate", "construct_pangenome_index")
+        ctx.get_action.assert_any_call("quality_control", "construct_pangenome_index")
         ctx.get_action.assert_any_call("quality_control", "filter_reads")
 
         ctx.get_action("quality_control", "filter_reads").assert_has_calls(

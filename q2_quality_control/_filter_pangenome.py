@@ -11,10 +11,10 @@ import shutil
 import subprocess
 import tempfile
 
-from q2_annotate._utils import run_command
+from q2_quality_control._utilities import _run_command
 
 EBI_SERVER_URL = (
-    "ftp://ftp.sra.ebi.ac.uk/vol1/analysis/ERZ127/" "ERZ12792464/hprc-v1.0-pggb.gfa.gz"
+    "ftp://ftp.sra.ebi.ac.uk/vol1/analysis/ERZ127/ERZ12792464/hprc-v1.0-pggb.gfa.gz"
 )
 
 
@@ -32,7 +32,7 @@ def _fetch_and_extract_pangenome(uri: str, dest_dir: str):
 
     try:
         print("Fetching the GFA file...")
-        run_command(["wget", uri, "-q", "-O", dest_fp])
+        _run_command(["wget", uri, "-q", "-O", dest_fp])
     except Exception as e:
         raise Exception(
             "Unable to connect to the server. Please try again later. "
@@ -40,7 +40,7 @@ def _fetch_and_extract_pangenome(uri: str, dest_dir: str):
         )
 
     print("Download finished. Extracting files...")
-    run_command(["gunzip", dest_fp])
+    _run_command(["gunzip", dest_fp])
 
 
 def _extract_fasta_from_gfa(gfa_fp: str, fasta_fp: str):
@@ -174,7 +174,7 @@ def filter_reads_human_pangenome(
     """
 
     filter_reads = ctx.get_action("quality_control", "filter_reads")
-    construct_index = ctx.get_action("annotate", "construct_human_pangenome_index")
+    construct_index = ctx.get_action("quality_control", "construct_human_pangenome_index")
 
     if index is None:
         print("Reference index was not provided - it will be generated.")
