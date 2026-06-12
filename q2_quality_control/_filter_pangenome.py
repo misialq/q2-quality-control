@@ -13,8 +13,6 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-import requests
-
 from q2_quality_control._utilities import _run_command
 
 EBI_SERVER_URL = (
@@ -24,6 +22,7 @@ EBI_SERVER_URL = (
 NCBI_DATASETS_URL = (
     "https://api.ncbi.nlm.nih.gov/datasets/v2/genome/accession/"
     "GCF_000001405.40/download"
+    "?include_annotation_type=GENOME_FASTA&hydrated=FULLY_HYDRATED"
 )
 GRCH38_GENOME_REL_FP = os.path.join(
     "ncbi_dataset", "data", "GCF_000001405.40",
@@ -42,7 +41,7 @@ def _fetch_and_extract_pangenome(dest_dir: str):
     dest_fp = os.path.join(dest_dir, filename)
 
     try:
-        print("Fetching the GFA file...")
+        print(f"Fetching the GFA file from {EBI_SERVER_URL}...")
         _run_command(["wget", EBI_SERVER_URL, "-q", "-O", dest_fp])
     except Exception as e:
         raise Exception(
@@ -113,33 +112,21 @@ def _fetch_and_extract_grch38(dest_dir: str):
     """
     Fetches and extracts the GRCh38 human reference genome.
 
-    This function uses the NCBI Datasets API to download a zip file
-    containing the GRCh38 human reference genome. The correctness of the
-    retrieved data is verified by comparing the MD5 hash of the downloaded
-    data file against the checksum provided in a separate file. The
-    fetched genome file is renamed to 'grch38.fasta'.
+    Downloads a zip file from the NCBI Datasets API containing the GRCh38
+    human reference genome. The correctness of the retrieved data is verified
+    by comparing the MD5 hash of the downloaded file against the checksum
+    provided in a separate file. The fetched genome file is renamed to
+    'grch38.fasta'.
 
     Args:
         dest_dir (str): The directory where the genome data will be saved.
     """
-    query_params = {
-        "include_annotation_type": ["GENOME_FASTA"],
-        "hydrated": "FULLY_HYDRATED"
-    }
     zip_fp = os.path.join(dest_dir, "data.zip")
 
     try:
-        with requests.get(
-                NCBI_DATASETS_URL, params=query_params, stream=True
-        ) as response:
-            response.raise_for_status()
-
-            print(f"Fetching the GRCh38 genome file from {response.url}...")
-            with open(zip_fp, "wb") as fp:
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    if chunk:
-                        fp.write(chunk)
-    except requests.exceptions.RequestException as e:
+        print(f"Fetching the GRCh38 genome file from {NCBI_DATASETS_URL}...")
+        _run_command(["wget", NCBI_DATASETS_URL, "-q", "-O", zip_fp])
+    except Exception as e:
         raise Exception(
             "The download failed. Please try again later. "
             f"The error was: {e}"
@@ -192,10 +179,7 @@ def construct_human_pangenome_index(ctx, threads=1):
     build_index = ctx.get_action("quality_control", "bowtie2_build")
 
     with tempfile.TemporaryDirectory() as tmp:
-        print("Fetching the human pangenome GFA file...")
         _fetch_and_extract_pangenome(tmp)
-
-        print("Fetching the human GRCh38 reference genome...")
         _fetch_and_extract_grch38(tmp)
 
         print("Converting pangenome GFA to FASTA...")

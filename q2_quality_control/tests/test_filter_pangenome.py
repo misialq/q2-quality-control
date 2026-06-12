@@ -16,7 +16,6 @@ import unittest
 import zipfile
 from unittest.mock import patch, ANY, call, MagicMock
 
-import requests
 from qiime2 import Artifact
 from q2_types.per_sample_sequences import (
     SingleLanePerSampleSingleEndFastqDirFmt,
@@ -47,12 +46,13 @@ from qiime2.plugins.quality_control.pipelines import (
 class TestPangenomeFiltering(TestPluginBase):
     package = "q2_quality_control.tests"
 
-    @patch("q2_quality_control._filter_pangenome.requests.get")
-    def test_fetch_and_extract_grch38(self, mock_get):
+    @patch("q2_quality_control._filter_pangenome._run_command")
+    def test_fetch_and_extract_grch38(self, mock_run):
         dest_dir = self.temp_dir.name
-
-        # zip the on-disk fixture that mirrors the NCBI Datasets download
         dataset_dir = self.get_data_path("pangenome/grch38_dataset")
+
+        # build a real zip from the on-disk fixture so the genuine unzip,
+        # md5 verification and move all run; only the wget call is stubbed
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as zf:
             for root, _, files in os.walk(dataset_dir):
@@ -61,24 +61,21 @@ class TestPangenomeFiltering(TestPluginBase):
                     zf.write(abs_fp, os.path.relpath(abs_fp, dataset_dir))
         zip_bytes = buffer.getvalue()
 
-        # the mocked streaming HTTP response (used as a context manager)
-        mock_response = MagicMock()
-        mock_response.url = "https://api.ncbi.nlm.nih.gov/datasets/download"
-        mock_response.iter_content.return_value = [zip_bytes]
-        mock_get.return_value.__enter__.return_value = mock_response
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == "wget":
+                with open(cmd[cmd.index("-O") + 1], "wb") as f:
+                    f.write(zip_bytes)
+            else:
+                real_run(cmd, **kwargs)
+
+        mock_run.side_effect = fake_run
 
         _fetch_and_extract_grch38(dest_dir)
 
-        # the NCBI Datasets API is queried with the expected URL and params
-        mock_get.assert_called_once_with(
-            NCBI_DATASETS_URL,
-            params={
-                "include_annotation_type": ["GENOME_FASTA"],
-                "hydrated": "FULLY_HYDRATED",
-            },
-            stream=True,
+        mock_run.assert_any_call(
+            ["wget", NCBI_DATASETS_URL, "-q", "-O",
+             os.path.join(dest_dir, "data.zip")]
         )
-        mock_response.raise_for_status.assert_called_once_with()
 
         # the verified genome is renamed to grch38.fasta with its contents
         # intact, and the original extracted file is gone (it was moved)
@@ -95,34 +92,16 @@ class TestPangenomeFiltering(TestPluginBase):
             os.path.exists(os.path.join(dest_dir, GRCH38_GENOME_REL_FP))
         )
 
-    @patch("q2_quality_control._filter_pangenome._run_command")
-    @patch("q2_quality_control._filter_pangenome.requests.get")
-    def test_fetch_and_extract_grch38_download_error(self, mock_get, mock_run):
-        mock_response = MagicMock()
-        mock_response.iter_content.side_effect = (
-            requests.exceptions.ChunkedEncodingError("connection dropped")
-        )
-        mock_get.return_value.__enter__.return_value = mock_response
-
+    @patch(
+        "q2_quality_control._filter_pangenome._run_command",
+        side_effect=OSError("connection failed"),
+    )
+    def test_fetch_and_extract_grch38_download_error(self, mock_run):
         with self.assertRaisesRegex(Exception, "The download failed"):
             _fetch_and_extract_grch38(self.temp_dir.name)
 
-        # extraction should never be reached if the download fails
-        mock_run.assert_not_called()
-
-    @patch("q2_quality_control._filter_pangenome._run_command")
-    @patch("q2_quality_control._filter_pangenome.requests.get")
-    def test_fetch_and_extract_grch38_http_error(self, mock_get, mock_run):
-        mock_response = MagicMock()
-        mock_response.raise_for_status.side_effect = (
-            requests.exceptions.HTTPError("500 Server Error")
-        )
-        mock_get.return_value.__enter__.return_value = mock_response
-
-        with self.assertRaisesRegex(Exception, "The download failed"):
-            _fetch_and_extract_grch38(self.temp_dir.name)
-
-        mock_run.assert_not_called()
+        # unzip should never be reached if wget fails
+        mock_run.assert_called_once()
 
     def test_verify_md5_valid(self):
         dataset_dir = self.get_data_path("pangenome/grch38_dataset")
@@ -313,10 +292,9 @@ class TestPangenomeFiltering(TestPluginBase):
 
     def test_construct_pangenome_index_end_to_end(self):
         # Runs the whole pipeline through the QIIME 2 framework with a real
-        # ctx: gunzip, unzip, md5 verification, gfatools, seqtk, make_artifact
-        # and a real bowtie2_build all execute. Only the two network downloads
-        # (the pangenome `wget` and the NCBI `requests.get`) are stubbed with
-        # local fixtures.
+        # ctx: gunzip, unzip, md5 verification, gfatools, make_artifact and a
+        # real bowtie2_build all execute. Only the two network wget calls are
+        # stubbed with local fixtures.
 
         # a real NCBI-style zip (genome + md5sum.txt) for the GRCh38 download
         dataset_dir = self.get_data_path("pangenome/grch38_dataset")
@@ -331,29 +309,24 @@ class TestPangenomeFiltering(TestPluginBase):
         gfa_fixture = self.get_data_path("pangenome/pangenome.gfa")
 
         def fake_run(cmd, **kwargs):
-            # the only network call routed through _run_command is the
-            # pangenome `wget`; stage a local gzipped GFA in its place and
-            # let everything else (gunzip, unzip) run for real
+            # both network calls use wget; intercept by URL and stage local
+            # fixtures; let everything else (gunzip, unzip) run for real
             if cmd[0] == "wget":
                 dest_fp = cmd[cmd.index("-O") + 1]
-                with open(gfa_fixture, "rb") as src, \
-                        gzip.open(dest_fp, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
+                if dest_fp.endswith(".gz"):
+                    with open(gfa_fixture, "rb") as src, \
+                            gzip.open(dest_fp, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                else:
+                    with open(dest_fp, "wb") as f:
+                        f.write(grch38_zip)
             else:
                 real_run(cmd, **kwargs)
 
-        mock_response = MagicMock()
-        mock_response.url = "https://api.ncbi.nlm.nih.gov/datasets/download"
-        mock_response.iter_content.return_value = [grch38_zip]
-
         with patch(
-            "q2_quality_control._filter_pangenome.requests.get"
-        ) as mock_get, patch(
             "q2_quality_control._filter_pangenome._run_command",
             side_effect=fake_run,
         ):
-            mock_get.return_value.__enter__.return_value = mock_response
-
             (index,) = construct_action(threads=1)
 
         # the pipeline completed and produced a real Bowtie2 index artifact;
