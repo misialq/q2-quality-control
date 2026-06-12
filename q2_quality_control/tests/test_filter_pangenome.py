@@ -153,15 +153,13 @@ class TestPangenomeFiltering(TestPluginBase):
             _verify_md5(genome_fp, checksum_fp, "missing.fna")
 
     @patch("subprocess.run")
-    @patch("os.remove")
-    def test_extract_from_gfa(self, p1, p2):
+    def test_extract_from_gfa(self, mock_run):
         fasta_fp = os.path.join(self.temp_dir.name, "some_fasta.fa")
         _extract_fasta_from_gfa("/some/gfa", fasta_fp)
 
-        p2.assert_called_once_with(
+        mock_run.assert_called_once_with(
             ["gfatools", "gfa2fa", "/some/gfa"], stdout=ANY
         )
-        p1.assert_called_once_with("/some/gfa")
 
     @patch("subprocess.run", side_effect=OSError)
     def test_extract_from_gfa_error(self, p1):
@@ -170,10 +168,7 @@ class TestPangenomeFiltering(TestPluginBase):
             _extract_fasta_from_gfa("/some/gfa", fasta_fp)
 
     def test_extract_from_gfa_end_to_end(self):
-        # _extract_fasta_from_gfa deletes the input, so
-        # work on a copy in the temp dir.
-        gfa_fp = os.path.join(self.temp_dir.name, "pangenome.gfa")
-        shutil.copy(self.get_data_path("pangenome/pangenome.gfa"), gfa_fp)
+        gfa_fp = self.get_data_path("pangenome/pangenome.gfa")
         obs = os.path.join(self.temp_dir.name, "from_gfa.fasta")
 
         _extract_fasta_from_gfa(gfa_fp, obs)
@@ -185,8 +180,6 @@ class TestPangenomeFiltering(TestPluginBase):
             ),
             "Extracted FASTA does not match the expected output",
         )
-        # the source GFA should be removed after a successful conversion
-        self.assertFalse(os.path.exists(gfa_fp))
 
     @patch("q2_quality_control._filter_pangenome._run_command")
     def test_fetch_and_extract_pangenome(self, p1):
@@ -209,35 +202,30 @@ class TestPangenomeFiltering(TestPluginBase):
             _fetch_and_extract_pangenome("/some/where")
 
     def test_combine_fasta_files_single(self):
-        fname1 = "grch38"
-        file1 = os.path.join(self.temp_dir.name, f"{fname1}.fasta")
-        shutil.copy(self.get_data_path(f"pangenome/{fname1}.fasta"), file1)
+        fixture = self.get_data_path("pangenome/grch38.fasta")
         obs = os.path.join(self.temp_dir.name, "out.fasta")
 
-        _combine_fasta_files(file1, fasta_out_fp=obs)
+        _combine_fasta_files(fixture, fasta_out_fp=obs)
 
         self.assertTrue(
-            filecmp.cmp(self.get_data_path(f"pangenome/{fname1}.fasta"), obs),
+            filecmp.cmp(fixture, obs, shallow=False),
             "Files are not identical",
         )
 
     def test_combine_fasta_files_multi(self):
-        fname1, fname2 = "pangenome", "grch38"
-        file1 = os.path.join(self.temp_dir.name, f"{fname1}.fasta")
-        file2 = os.path.join(self.temp_dir.name, f"{fname2}.fasta")
-        shutil.copy(self.get_data_path(f"pangenome/{fname1}.fasta"), file1)
-        shutil.copy(self.get_data_path(f"pangenome/{fname2}.fasta"), file2)
+        fixture1 = self.get_data_path("pangenome/pangenome.fasta")
+        fixture2 = self.get_data_path("pangenome/grch38.fasta")
         obs = os.path.join(self.temp_dir.name, "out.fasta")
 
-        _combine_fasta_files(file1, file2, fasta_out_fp=obs)
+        _combine_fasta_files(fixture1, fixture2, fasta_out_fp=obs)
 
         self.assertTrue(
-            filecmp.cmp(self.get_data_path("pangenome/combined.fasta"), obs),
+            filecmp.cmp(self.get_data_path("pangenome/combined.fasta"), obs,
+                        shallow=False),
             "Files are not identical",
         )
 
-    @patch("subprocess.run", side_effect=OSError)
-    def test_combine_fasta_files_error(self, p1):
+    def test_combine_fasta_files_error(self):
         obs = os.path.join(self.temp_dir.name, "out.fasta")
 
         with self.assertRaisesRegex(Exception, "Failed to add the /fake/file"):
@@ -265,15 +253,17 @@ class TestPangenomeFiltering(TestPluginBase):
         )
         ctx.make_artifact.return_value = MagicMock()
 
-        # prepare some files that will be used by _combined_fasta_files
+        # the three fetch/extract helpers are mocked, so we stage their
+        # expected outputs manually: a blank .gfa for the glob, and the two
+        # FASTA files that _combine_fasta_files (which is NOT mocked) will read
         open(os.path.join(temp_dir, "pangenome.gfa"), "w").close()
-        shutil.copy(
-            self.get_data_path("pangenome/grch38.fasta"),
-            os.path.join(temp_dir, "grch38.fasta"),
-        )
         shutil.copy(
             self.get_data_path("pangenome/pangenome.fasta"),
             os.path.join(temp_dir, "pangenome.fasta"),
+        )
+        shutil.copy(
+            self.get_data_path("pangenome/grch38.fasta"),
+            os.path.join(temp_dir, "grch38.fasta"),
         )
 
         with patch(

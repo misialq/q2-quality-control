@@ -59,8 +59,7 @@ def _extract_fasta_from_gfa(gfa_fp: str, fasta_fp: str):
     Extracts a FASTA file from a GFA file using gfatools.
 
     This function runs a subprocess calling 'gfatools' to convert a GFA file
-    into a FASTA file. If the conversion is successful, the original GFA
-    file is removed. Otherwise, an exception is raised.
+    into a FASTA file. If the conversion fails, an exception is raised.
 
     Args:
         gfa_fp (str): The file path to the input GFA file.
@@ -75,7 +74,6 @@ def _extract_fasta_from_gfa(gfa_fp: str, fasta_fp: str):
                 "Failed to extract the fasta file from the GFA. "
                 f"The error was: {e}"
             )
-    os.remove(gfa_fp)
 
 
 def _verify_md5(file_fp: str, checksum_fp: str, key: str):
@@ -161,9 +159,8 @@ def _combine_fasta_files(*fasta_in_fp, fasta_out_fp):
     """
     Combines multiple FASTA files into a single FASTA file.
 
-    This function uses 'seqtk' to format and combine multiple FASTA files
-    into a single file. Each input FASTA file is appended to the output file.
-    After processing, the input files are removed.
+    Sequences are uppercased during combination so that the resulting file
+    is suitable as a bowtie2 reference index.
 
     Args:
         *fasta_in_fp: Variable length argument list of paths to input
@@ -174,13 +171,16 @@ def _combine_fasta_files(*fasta_in_fp, fasta_out_fp):
     with open(fasta_out_fp, "a") as f_out:
         for f_in in fasta_in_fp:
             try:
-                subprocess.run(["seqtk", "seq", "-U", f_in], stdout=f_out)
+                with open(f_in) as f:
+                    for line in f:
+                        f_out.write(
+                            line if line.startswith(">") else line.upper()
+                        )
             except Exception as e:
                 raise Exception(
                     f"Failed to add the {f_in} to the reference FASTA file. "
                     f"The error was: {e}"
                 )
-            os.remove(f_in)
 
 
 def construct_human_pangenome_index(ctx, threads=1):
