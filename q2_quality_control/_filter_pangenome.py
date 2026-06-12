@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2025, QIIME 2 development team.
+# Copyright (c) 2017-2026, QIIME 2 development team.
 #
 # Distributed under the terms of the Modified BSD License.
 #
@@ -18,11 +18,16 @@ import requests
 from q2_quality_control._utilities import _run_command
 
 EBI_SERVER_URL = (
-    "ftp://ftp.sra.ebi.ac.uk/vol1/analysis/ERZ127/ERZ12792464/hprc-v1.0-pggb.gfa.gz"
+    "ftp://ftp.sra.ebi.ac.uk/vol1/analysis/ERZ127/ERZ12792464/"
+    "hprc-v1.0-pggb.gfa.gz"
 )
 NCBI_DATASETS_URL = (
     "https://api.ncbi.nlm.nih.gov/datasets/v2/genome/accession/"
     "GCF_000001405.40/download"
+)
+GRCH38_GENOME_REL_FP = os.path.join(
+    "ncbi_dataset", "data", "GCF_000001405.40",
+    "GCF_000001405.40_GRCh38.p14_genomic.fna",
 )
 
 
@@ -67,7 +72,8 @@ def _extract_fasta_from_gfa(gfa_fp: str, fasta_fp: str):
             subprocess.run(cmd, stdout=f_out)
         except Exception as e:
             raise Exception(
-                f"Failed to extract the fasta file from the GFA. " f"The error was: {e}"
+                "Failed to extract the fasta file from the GFA. "
+                f"The error was: {e}"
             )
     os.remove(gfa_fp)
 
@@ -135,7 +141,7 @@ def _fetch_and_extract_grch38(dest_dir: str):
                 for chunk in response.iter_content(chunk_size=1024 * 1024):
                     if chunk:
                         fp.write(chunk)
-    except requests.exceptions.ChunkedEncodingError as e:
+    except requests.exceptions.RequestException as e:
         raise Exception(
             "The download failed. Please try again later. "
             f"The error was: {e}"
@@ -144,14 +150,10 @@ def _fetch_and_extract_grch38(dest_dir: str):
     print("Download finished. Extracting files...")
     _run_command(["unzip", zip_fp, "-d", dest_dir])
 
-    genome_rel_fp = os.path.join(
-        "ncbi_dataset", "data", "GCF_000001405.40",
-        "GCF_000001405.40_GRCh38.p14_genomic.fna"
-    )
-    genome_fp = os.path.join(dest_dir, genome_rel_fp)
+    genome_fp = os.path.join(dest_dir, GRCH38_GENOME_REL_FP)
     checksum_fp = os.path.join(dest_dir, "md5sum.txt")
 
-    _verify_md5(genome_fp, checksum_fp, genome_rel_fp)
+    _verify_md5(genome_fp, checksum_fp, GRCH38_GENOME_REL_FP)
     shutil.move(genome_fp, os.path.join(dest_dir, "grch38.fasta"))
 
 
@@ -236,7 +238,9 @@ def filter_reads_human_pangenome(
     """
 
     filter_reads = ctx.get_action("quality_control", "filter_reads")
-    construct_index = ctx.get_action("quality_control", "construct_human_pangenome_index")
+    construct_index = ctx.get_action(
+        "quality_control", "construct_human_pangenome_index"
+    )
 
     if index is None:
         print("Reference index was not provided - it will be generated.")

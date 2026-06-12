@@ -365,7 +365,9 @@ plugin.pipelines.register_function(
         },
     },
     output_descriptions={
-        "filtered_reads": ("Original reads without the contaminating human reads."),
+        "filtered_reads": (
+            "Original reads without the contaminating human reads."
+        ),
         "reference_index": (
             "Generated combined human reference index. If an "
             "index was provided as an input, it will be "
